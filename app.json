@@ -2,28 +2,61 @@
   "expo": {
     "name": "wirdly",
     "slug": "wirdly",
-    "version": "1.0.0",
+    "version": "1.2.0",
+    "description": "Wirdly is a smart Islamic reminder app that prompts you to read the specific awraad or dua you've personally set, automatically timed to your local salah or any other time so you never miss a wird again.",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#2E7D32"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jamaal1.wirdly",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "This app needs your location to calculate accurate prayer times for your area.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs your location to provide prayer times and send timely notifications.",
+        "NSCameraUsageDescription": "This app needs camera access to allow you to take photos for your reminders.",
+        "NSPhotoLibraryUsageDescription": "This app needs photo library access to allow you to select images for your reminders.",
+        "NSMicrophoneUsageDescription": "This app needs microphone access for audio features.",
+        "NSPrivacyAccessedAPITypes": [],
+        "NSPrivacyTracking": false,
+        "NSPrivacyTrackingDomains": [],
+        "NSPrivacyCollectedDataTypes": []
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [],
+        "NSPrivacyTracking": false,
+        "NSPrivacyTrackingDomains": [],
+        "NSPrivacyCollectedDataTypes": []
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#2E7D32"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.jamaal1.wirdly",
+      "permissions": [],
+      "privacy": {
+        "permissions": []
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "e7d3a7c1-efb3-4474-8e5a-d92dc709f584"
+      }
     }
   }
 }
