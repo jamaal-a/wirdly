@@ -1,3 +1,4 @@
+import { toGregorian, toHijri } from 'hijri-converter';
 import { WirdReminder, PrayerTimes, TimeComponents } from '../types';
 import { notificationService } from './notificationService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -82,10 +83,15 @@ export const reminderService = {
     category: WirdReminder['category'];
     type: WirdReminder['type'];
     prayerTime?: keyof PrayerTimes;
+    prayerTimes?: (keyof PrayerTimes)[];
     time?: string;
     dayOfWeek?: number;
+    daysOfWeek?: number[];
     dayOfMonth?: number;
+    daysOfMonth?: number[];
     month?: number;
+    isHijriYearly?: boolean;
+    isHijriMonthly?: boolean;
     isActive: boolean;
   }): WirdReminder => {
     // Generate unique ID using timestamp + random number to avoid duplicates
@@ -155,7 +161,8 @@ export const reminderService = {
       updates.dayOfWeek !== undefined ||
       updates.dayOfMonth !== undefined ||
       updates.month !== undefined ||
-      updates.time !== undefined
+      updates.time !== undefined ||
+      updates.isHijriYearly !== undefined
     );
 
     if (shouldRecalculateTrigger) {
@@ -237,16 +244,37 @@ export const reminderService = {
       if (!reminder.isActive) return false;
       
       switch (reminder.type) {
-        case 'prayer':
-          return prayerTimes && isPrayerTimeDue(reminder.prayerTime!, prayerTimes, currentTime);
-        case 'daily':
+        case 'prayer': {
+          if (!prayerTimes) return false;
+          const toCheck = (reminder.prayerTimes && reminder.prayerTimes.length > 0)
+            ? reminder.prayerTimes
+            : reminder.prayerTime ? [reminder.prayerTime] : [];
+          return toCheck.some(pt => isPrayerTimeDue(pt, prayerTimes, currentTime));
+        }
+        case 'daily': {
+          if (reminder.daysOfWeek && reminder.daysOfWeek.length > 0) {
+            if (!reminder.daysOfWeek.includes(currentTime.getDay())) return false;
+          }
           return isDailyReminderDue(reminder.time!, currentTime);
+        }
         case 'weekly':
           return isWeeklyReminderDue(reminder.dayOfWeek!, currentTime);
-        case 'monthly':
+        case 'monthly': {
+          if (reminder.daysOfMonth && reminder.daysOfMonth.length > 0) {
+            if (reminder.isHijriMonthly) {
+              try {
+                const { hd } = toHijri(currentTime.getFullYear(), currentTime.getMonth() + 1, currentTime.getDate());
+                return reminder.daysOfMonth.includes(hd);
+              } catch { return false; }
+            }
+            return reminder.daysOfMonth.includes(currentTime.getDate());
+          }
           return isMonthlyReminderDue(reminder.dayOfMonth!, currentTime);
+        }
         case 'yearly':
-          return isYearlyReminderDue(reminder.month!, reminder.dayOfMonth!, currentTime);
+          return reminder.isHijriYearly
+            ? isHijriYearlyReminderDue(reminder.month!, reminder.dayOfMonth!, currentTime)
+            : isYearlyReminderDue(reminder.month!, reminder.dayOfMonth!, currentTime);
         case 'hourly':
           return isHourlyReminderDue(currentTime);
         default:
@@ -274,7 +302,9 @@ function calculateNextTrigger(reminder: WirdReminder): Date | undefined {
       return calculateNextMonthlyTrigger(reminder.dayOfMonth, reminder.time, now);
     case 'yearly':
       if (!reminder.month || !reminder.dayOfMonth) return undefined;
-      return calculateNextYearlyTrigger(reminder.month, reminder.dayOfMonth, reminder.time, now);
+      return reminder.isHijriYearly
+        ? calculateNextHijriYearlyTrigger(reminder.month, reminder.dayOfMonth, reminder.time, now)
+        : calculateNextYearlyTrigger(reminder.month, reminder.dayOfMonth, reminder.time, now);
     case 'hourly':
       return calculateNextHourlyTrigger(now);
     default:
@@ -382,6 +412,23 @@ function calculateNextYearlyTrigger(month: number, dayOfMonth: number, time: str
   return next;
 }
 
+function calculateNextHijriYearlyTrigger(hijriMonth: number, hijriDay: number, time: string | undefined, from: Date): Date {
+  const { hours, minutes } = parseTimeString(time);
+  const { hy: currentHijriYear } = toHijri(from.getFullYear(), from.getMonth() + 1, from.getDate());
+  const day = Math.min(hijriDay, 30);
+
+  for (let y = 0; y <= 1; y++) {
+    try {
+      const greg = toGregorian(currentHijriYear + y, hijriMonth, day);
+      const next = new Date(greg.gy, greg.gm - 1, greg.gd, hours, minutes, 0, 0);
+      if (next > from) return next;
+    } catch {
+      // Invalid date, try next year
+    }
+  }
+  return new Date(from.getTime() + 365 * 24 * 60 * 60 * 1000); // Fallback
+}
+
 // Helper functions to check if reminders are due
 function isPrayerTimeDue(prayerTime: keyof PrayerTimes, prayerTimes: PrayerTimes, currentTime: Date): boolean {
   const prayerTimeStr = prayerTimes[prayerTime];
@@ -414,6 +461,19 @@ function isMonthlyReminderDue(dayOfMonth: number, currentTime: Date): boolean {
 
 function isYearlyReminderDue(month: number, dayOfMonth: number, currentTime: Date): boolean {
   return currentTime.getMonth() === month - 1 && currentTime.getDate() === dayOfMonth;
+}
+
+function isHijriYearlyReminderDue(hijriMonth: number, hijriDay: number, currentTime: Date): boolean {
+  try {
+    const { hy, hm, hd } = toHijri(
+      currentTime.getFullYear(),
+      currentTime.getMonth() + 1,
+      currentTime.getDate(),
+    );
+    return hm === hijriMonth && hd === Math.min(hijriDay, 30);
+  } catch {
+    return false;
+  }
 }
 
 function calculateNextHourlyTrigger(from: Date): Date {

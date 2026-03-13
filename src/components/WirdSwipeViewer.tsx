@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,40 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import { WirdReminder } from '../types';
+
+// Resolves file:// URIs to base64 for reliable display on iOS
+const ResolvedImage: React.FC<{ uri: string; style: any }> = ({ uri, style }) => {
+  const [resolvedUri, setResolvedUri] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    if (!uri) return;
+    if (uri.startsWith('http://') || uri.startsWith('https://')) {
+      setResolvedUri(uri);
+      return;
+    }
+    const fileUri = uri.startsWith('file://') ? uri : `file://${uri}`;
+    FileSystem.getInfoAsync(fileUri)
+      .then((info) => {
+        if (!info.exists) {
+          setError(true);
+          return null;
+        }
+        return FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      })
+      .then((base64) => {
+        if (!base64) return;
+        const ext = uri.split('.').pop()?.split('?')[0]?.toLowerCase() || 'jpg';
+        const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+        setResolvedUri(`data:${mime};base64,${base64}`);
+      })
+      .catch(() => setError(true));
+  }, [uri]);
+  if (error) return <View style={[style, { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ fontSize: 48 }}>📷</Text></View>;
+  if (!resolvedUri) return <View style={[style, { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ fontSize: 14, color: '#999' }}>Loading...</Text></View>;
+  return <Image source={{ uri: resolvedUri }} style={style} resizeMode="contain" />;
+};
 
 const { width } = Dimensions.get('window');
 
@@ -21,6 +54,7 @@ interface WirdSwipeViewerProps {
   reminders: WirdReminder[];
   onClose: () => void;
   onComplete: (id: string) => void;
+  onViewReminder?: (reminder: WirdReminder) => void;
 }
 
 const WirdSwipeViewer: React.FC<WirdSwipeViewerProps> = ({
@@ -28,6 +62,7 @@ const WirdSwipeViewer: React.FC<WirdSwipeViewerProps> = ({
   reminders,
   onClose,
   onComplete,
+  onViewReminder,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
@@ -78,10 +113,9 @@ const WirdSwipeViewer: React.FC<WirdSwipeViewerProps> = ({
                 }
               }}
             >
-              <Image
-                source={{ uri: item.imageUrl }}
+              <ResolvedImage
+                uri={item.imageUrl}
                 style={styles.cardImage}
-                resizeMode="contain"
               />
             </TouchableOpacity>
           )}
@@ -115,6 +149,15 @@ const WirdSwipeViewer: React.FC<WirdSwipeViewerProps> = ({
               {isLast ? '✓ Complete All' : '✓ Complete & Next →'}
             </Text>
           </TouchableOpacity>
+          {(item.imageUrl || item.linkUrl || item.fileUrl) && onViewReminder && (
+            <TouchableOpacity
+              style={styles.viewReminderButton}
+              onPress={() => onViewReminder(item)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.viewReminderButtonText}>View Reminder</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -270,7 +313,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
   },
+  viewReminderButton: {
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#4A90E2',
+    alignItems: 'center',
+  },
+  viewReminderButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
 
 export default WirdSwipeViewer;
-

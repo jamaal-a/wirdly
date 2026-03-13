@@ -21,6 +21,7 @@ const SettingsScreen: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalType, setModalType] = useState<string>('');
   const [modalValue, setModalValue] = useState<string>('');
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -550,6 +551,44 @@ const SettingsScreen: React.FC = () => {
             )}
           </View>
 
+          {/* How to Use Guide */}
+          <View style={dynamicStyles.section}>
+            <Text style={dynamicStyles.sectionTitle}>Help</Text>
+            {renderSettingItem(
+              'How to Use Wirdly',
+              showGuide ? 'Tap to close guide' : 'Learn how to use the app',
+              '📖',
+              () => setShowGuide(!showGuide)
+            )}
+            {showGuide && (
+              <View style={styles.guideContainer}>
+                <Text style={styles.guideText}>
+                  Wirdly is not a standard dua or dhikr app with pre-built content. It's your personal wird reminder system - you set up the specific awraad, duas, and adhkar that YOU want to practice, and the app reminds you at the right times.
+                </Text>
+
+                <Text style={styles.guideSubtitle}>Getting Started</Text>
+                <Text style={styles.guideBullet}>1. Go to the Wirds tab and tap "Add New Reminder"</Text>
+                <Text style={styles.guideBullet}>2. Give your wird a title (e.g. "Morning Adhkar", "Ayat al-Kursi")</Text>
+                <Text style={styles.guideBullet}>3. Attach an image of the dua/dhikr, a link, or a file</Text>
+                <Text style={styles.guideBullet}>4. Choose when to be reminded: at prayer times, daily, weekly, monthly, or yearly</Text>
+                <Text style={styles.guideBullet}>5. For prayer-based reminders, select which prayers (e.g. Fajr and Maghrib)</Text>
+
+                <Text style={styles.guideSubtitle}>Features</Text>
+                <Text style={styles.guideBullet}>- Attach images of your wird pages so you can read directly from the app</Text>
+                <Text style={styles.guideBullet}>- Set reminders for multiple prayer times in one go</Text>
+                <Text style={styles.guideBullet}>- Track your completion streaks and progress</Text>
+                <Text style={styles.guideBullet}>- Use the Wird Sessions feature to swipe through all wirds for a prayer time</Text>
+                <Text style={styles.guideBullet}>- Filter reminders by type, category, or prayer time</Text>
+                <Text style={styles.guideBullet}>- Use the Tasbeeh counter for your daily dhikr counts</Text>
+
+                <Text style={styles.guideSubtitle}>Prayer Times</Text>
+                <Text style={styles.guideBullet}>- The Salah tab shows today's prayer times with a live countdown</Text>
+                <Text style={styles.guideBullet}>- Expand "Upcoming Days" to see the next 5 days</Text>
+                <Text style={styles.guideBullet}>- Change calculation method to match your local mosque</Text>
+              </View>
+            )}
+          </View>
+
           {/* Reset Section */}
           <View style={dynamicStyles.section}>
             <Text style={dynamicStyles.sectionTitle}>Reset</Text>
@@ -567,7 +606,7 @@ const SettingsScreen: React.FC = () => {
             <View style={styles.aboutCard}>
               <Text style={styles.aboutTitle}>Wirdly</Text>
               <Text style={styles.aboutSubtitle}>Your Spiritual Companion</Text>
-              <Text style={styles.aboutVersion}>Version 1.2.0</Text>
+              <Text style={styles.aboutVersion}>Version 1.4.0</Text>
               <Text style={styles.aboutDescription}>
                 Wirdly is a smart Islamic reminder app that prompts you to read the specific awraad or dua you've personally set, automatically timed to your local salah or any other time so you never miss a wird again.
               </Text>
@@ -991,6 +1030,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     marginRight: 8,
+  },
+  guideContainer: {
+    padding: 20,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    marginTop: 8,
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  guideSubtitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4A90E2',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  guideText: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  guideBullet: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 24,
+    paddingLeft: 8,
   },
   aboutCard: {
     backgroundColor: '#F8F9FA',

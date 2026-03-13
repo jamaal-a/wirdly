@@ -13,12 +13,14 @@ import {
   Platform,
   Linking,
   Dimensions,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
+import { useRoute, useNavigation, useFocusEffect, RouteProp } from '@react-navigation/native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { WirdReminder, RootTabParamList, PrayerTimes } from '../types';
@@ -91,6 +93,38 @@ const timeStringToDate = (input?: string): Date => {
 
 type WirdsScreenRouteProp = RouteProp<RootTabParamList, 'Wirds'>;
 
+// Resolves file:// URIs to base64 for reliable display on iOS (RN Image has issues with local files)
+const LocalImage: React.FC<{ uri: string; style: any; resizeMode?: 'cover' | 'contain' }> = ({ uri, style, resizeMode = 'cover' }) => {
+  const [resolvedUri, setResolvedUri] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    if (!uri) return;
+    if (uri.startsWith('http://') || uri.startsWith('https://')) {
+      setResolvedUri(uri);
+      return;
+    }
+    const fileUri = uri.startsWith('file://') ? uri : `file://${uri}`;
+    FileSystem.getInfoAsync(fileUri)
+      .then((info) => {
+        if (!info.exists) {
+          setError(true);
+          return null;
+        }
+        return FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      })
+      .then((base64) => {
+        if (!base64) return;
+        const ext = uri.split('.').pop()?.split('?')[0]?.toLowerCase() || 'jpg';
+        const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+        setResolvedUri(`data:${mime};base64,${base64}`);
+      })
+      .catch(() => setError(true));
+  }, [uri]);
+  if (error) return <View style={[style, { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ fontSize: 24 }}>📷</Text></View>;
+  if (!resolvedUri) return <View style={[style, { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ fontSize: 12, color: '#999' }}>...</Text></View>;
+  return <Image source={{ uri: resolvedUri }} style={style} resizeMode={resizeMode} />;
+};
+
 const WirdsScreen: React.FC = () => {
   const route = useRoute<WirdsScreenRouteProp>();
   const navigation = useNavigation();
@@ -113,6 +147,10 @@ const WirdsScreen: React.FC = () => {
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [timePickerValue, setTimePickerValue] = useState<Date>(() => timeStringToDate('09:00 AM'));
   const [selectedPrayerFilter, setSelectedPrayerFilter] = useState<keyof PrayerTimes | 'all'>('all');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<WirdReminder['type'] | 'all' | 'time-based'>('all');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<WirdReminder['category'] | 'all'>('all');
+  const [viewingReminderImageError, setViewingReminderImageError] = useState(false);
+  const [resolvedImageUri, setResolvedImageUri] = useState<string | null>(null);
   const [scrollViewKey, setScrollViewKey] = useState(0);
   const [datePickerType, setDatePickerType] = useState<'gregorian' | 'hijri'>('gregorian');
   const [hijriMonth, setHijriMonth] = useState(1);
@@ -139,22 +177,32 @@ const WirdsScreen: React.FC = () => {
     return () => clearInterval(interval);
   }, [theme.background, themeMode]);
 
-  const [newReminder, setNewReminder] = useState({
+  const [newReminder, setNewReminder] = useState<{
+    title: string; description: string; category: WirdReminder['category'];
+    type: WirdReminder['type']; time: string; dayOfWeek: number; dayOfMonth: number;
+    month: number; prayerTime: keyof PrayerTimes; selectedPrayers: Array<keyof PrayerTimes>;
+    selectedDaysOfWeek: number[]; selectedDaysOfMonth: number[];
+    isActive: boolean; imageUrl: string; fileUrl: string; linkUrl: string;
+    completedDates: string[]; streakCount: number; totalCompletions: number;
+    isHijriYearly?: boolean; isHijriMonthly?: boolean;
+  }>({
     title: '',
     description: '',
-    category: 'other' as WirdReminder['category'],
-    type: 'daily' as WirdReminder['type'],
+    category: 'other',
+    type: 'daily',
     time: '09:00 AM',
     dayOfWeek: 0,
     dayOfMonth: 1,
     month: 1,
-    prayerTime: 'Fajr' as keyof import('../types').PrayerTimes,
-    selectedPrayers: [] as Array<keyof import('../types').PrayerTimes>,
+    prayerTime: 'Fajr',
+    selectedPrayers: [],
+    selectedDaysOfWeek: [],
+    selectedDaysOfMonth: [],
     isActive: true,
     imageUrl: '',
     fileUrl: '',
     linkUrl: '',
-    completedDates: [] as string[],
+    completedDates: [],
     streakCount: 0,
     totalCompletions: 0,
   });
@@ -162,6 +210,23 @@ const WirdsScreen: React.FC = () => {
   useEffect(() => {
     loadReminders();
     requestImagePickerPermission();
+  }, []);
+
+  // Reload reminders when screen comes into focus (fixes reminders not showing when switching tabs)
+  useFocusEffect(
+    React.useCallback(() => {
+      loadReminders();
+    }, [])
+  );
+
+  // Reload reminders when app returns from background (fixes reminders not showing after leaving app)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        loadReminders();
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   useEffect(() => {
@@ -230,9 +295,18 @@ const WirdsScreen: React.FC = () => {
     setTimePickerValue(timeStringToDate(newReminder.time));
   };
 
-  // Handle navigation from notification
+  // Handle navigation from notification (route params or pending from cold start)
   useEffect(() => {
-    const reminderId = route.params?.reminderId;
+    const reminderId = route.params?.reminderId ?? (global as any).__pendingNotificationReminderId;
+    const pendingImageUrl = (global as any).__pendingNotificationImageUrl;
+    const pendingFileUrl = (global as any).__pendingNotificationFileUrl;
+    const pendingLinkUrl = (global as any).__pendingNotificationLinkUrl;
+    if ((global as any).__pendingNotificationReminderId) {
+      (global as any).__pendingNotificationReminderId = undefined;
+      (global as any).__pendingNotificationImageUrl = undefined;
+      (global as any).__pendingNotificationFileUrl = undefined;
+      (global as any).__pendingNotificationLinkUrl = undefined;
+    }
     
     // Only handle if reminderId exists, reminders are loaded, and we haven't already handled this reminderId
     if (reminderId && reminders.length > 0 && handledReminderIdRef.current !== reminderId) {
@@ -240,29 +314,100 @@ const WirdsScreen: React.FC = () => {
       const reminder = reminders.find(r => r.id === reminderId);
       if (reminder) {
         console.log('Found reminder:', reminder.title);
-        console.log('Reminder imageUrl:', reminder.imageUrl);
-        console.log('Full reminder object:', JSON.stringify(reminder, null, 2));
-        // Open in view mode instead of edit mode
-        setViewingReminder(reminder);
+        // Merge notification payload URLs as fallback (e.g. if storage has stale path)
+        const mergedReminder: WirdReminder = {
+          ...reminder,
+          imageUrl: reminder.imageUrl || pendingImageUrl,
+          fileUrl: reminder.fileUrl || pendingFileUrl,
+          linkUrl: reminder.linkUrl || pendingLinkUrl,
+        };
+        setViewingReminderImageError(false);
+        setViewingReminder(mergedReminder);
         setViewModalVisible(true);
         
-        // Mark as handled and clear the route params
         handledReminderIdRef.current = reminderId;
         navigation.setParams({ reminderId: undefined } as any);
       } else {
         console.log('Reminder not found with ID:', reminderId);
-        console.log('Available reminders:', reminders.map(r => ({ id: r.id, title: r.title })));
-        // Clear params even if reminder not found
         handledReminderIdRef.current = reminderId;
         navigation.setParams({ reminderId: undefined } as any);
       }
     }
     
-    // Reset handled reminderId when route params change to a new reminderId
     if (!reminderId) {
       handledReminderIdRef.current = undefined;
     }
-  }, [route.params?.reminderId, reminders.length]); // Only run when reminderId changes or reminders are loaded
+  }, [route.params?.reminderId, reminders]);
+
+  // Sync viewingReminder with latest reminder data when reminders change
+  useEffect(() => {
+    if (viewingReminder && viewModalVisible) {
+      const updatedReminder = reminders.find(r => r.id === viewingReminder.id);
+      if (updatedReminder && JSON.stringify(updatedReminder) !== JSON.stringify(viewingReminder)) {
+        setViewingReminderImageError(false);
+        setViewingReminder(updatedReminder);
+      }
+    }
+  }, [reminders, viewModalVisible]);
+
+  // Reset image error when modal closes
+  useEffect(() => {
+    if (!viewModalVisible) {
+      setViewingReminderImageError(false);
+      setResolvedImageUri(null);
+    }
+  }, [viewModalVisible]);
+
+  // Resolve local file:// URIs to base64 data URIs for reliable display on iOS
+  useEffect(() => {
+    if (!viewModalVisible || !viewingReminder?.imageUrl) {
+      setResolvedImageUri(null);
+      return;
+    }
+    const uri = viewingReminder.imageUrl.trim();
+    // HTTP/HTTPS URLs work directly
+    if (uri.startsWith('http://') || uri.startsWith('https://')) {
+      setResolvedImageUri(uri);
+      setViewingReminderImageError(false);
+      return;
+    }
+    const tryRead = async (fileUri: string): Promise<string | null> => {
+      try {
+        const info = await FileSystem.getInfoAsync(fileUri);
+        if (!info.exists) return null;
+        const base64 = await FileSystem.readAsStringAsync(fileUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const ext = uri.split('.').pop()?.split('?')[0]?.toLowerCase() || 'jpg';
+        const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+        return `data:${mime};base64,${base64}`;
+      } catch {
+        return null;
+      }
+    };
+    (async () => {
+      const candidates: string[] = [
+        uri.startsWith('file://') ? uri : uri.startsWith('/') ? `file://${uri}` : `file:///${uri}`,
+      ];
+      if (FileSystem.documentDirectory) {
+        if (uri.includes('wirdly_images')) {
+          const match = uri.match(/wirdly_images\/[^?]+/);
+          if (match) candidates.push(`${FileSystem.documentDirectory}${match[0]}`);
+        }
+        candidates.push(`${FileSystem.documentDirectory}wirdly_images/${uri.split('/').pop()?.split('?')[0] || 'image.jpg'}`);
+      }
+      for (const fileUri of candidates) {
+        const result = await tryRead(fileUri);
+        if (result) {
+          setResolvedImageUri(result);
+          setViewingReminderImageError(false);
+          return;
+        }
+      }
+      setViewingReminderImageError(true);
+      setResolvedImageUri(null);
+    })();
+  }, [viewModalVisible, viewingReminder?.imageUrl]);
 
   // Sync viewingReminder with latest reminder data when reminders change
   useEffect(() => {
@@ -427,12 +572,13 @@ const WirdsScreen: React.FC = () => {
     return colors[category] || '#95A5A6';
   };
 
-  const loadReminders = () => {
+  const loadReminders = async () => {
+    await reminderService.initialize();
     const allReminders = reminderService.getAllReminders();
     setReminders(allReminders);
   };
 
-  const createReminder = () => {
+  const createReminder = async () => {
     if (!newReminder.title.trim()) {
       Alert.alert('Error', 'Please enter a title for the reminder');
       return;
@@ -443,16 +589,53 @@ const WirdsScreen: React.FC = () => {
     if (['daily', 'weekly', 'monthly', 'yearly'].includes(newReminder.type)) {
       reminderToSave = { ...reminderToSave, time: normalizeTimeString(newReminder.time) };
     }
-    
-    // Ensure imageUrl is set from selectedImage if available
+    // For yearly reminders, set isHijriYearly based on date picker selection
+    if (newReminder.type === 'yearly') {
+      reminderToSave = {
+        ...reminderToSave,
+        isHijriYearly: datePickerType === 'hijri',
+        ...(datePickerType === 'hijri' && { month: hijriMonth, dayOfMonth: hijriDay }),
+      };
+    }
+    // For daily reminders, pass selected days of week
+    if (newReminder.type === 'daily' && newReminder.selectedDaysOfWeek.length > 0) {
+      reminderToSave = { ...reminderToSave, daysOfWeek: newReminder.selectedDaysOfWeek } as any;
+    }
+    // For monthly reminders, pass selected days and hijri flag
+    if (newReminder.type === 'monthly') {
+      if (newReminder.selectedDaysOfMonth.length > 0) {
+        reminderToSave = { ...reminderToSave, daysOfMonth: newReminder.selectedDaysOfMonth } as any;
+      }
+      if (newReminder.isHijriMonthly) {
+        reminderToSave = { ...reminderToSave, isHijriMonthly: true } as any;
+      }
+    }
+    // Ensure imageUrl is set from selectedImage if available; copy to persistent storage if file:// (temp from picker)
     if (selectedImage) {
-      reminderToSave = { ...reminderToSave, imageUrl: selectedImage };
+      let finalImageUrl = selectedImage;
+      if (selectedImage.startsWith('file://') && !selectedImage.includes('wirdly_images')) {
+        try {
+          const ext = selectedImage.split('.').pop()?.split('?')[0] || 'jpg';
+          const dest = `${FileSystem.documentDirectory}wirdly_images/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+          await FileSystem.makeDirectoryAsync(`${FileSystem.documentDirectory}wirdly_images`, { intermediates: true });
+          await FileSystem.copyAsync({ from: selectedImage, to: dest });
+          finalImageUrl = dest;
+        } catch (e) {
+          console.warn('Could not copy image to persistent storage:', e);
+        }
+      }
+      reminderToSave = { ...reminderToSave, imageUrl: finalImageUrl };
     }
 
     try {
       if (editingReminder) {
         // Update existing reminder
-        const updatedReminder = reminderService.updateReminder(editingReminder.id, reminderToSave);
+        const updates: Partial<WirdReminder> = { ...reminderToSave };
+        if (reminderToSave.type === 'prayer' && reminderToSave.selectedPrayers.length > 0) {
+          updates.prayerTimes = reminderToSave.selectedPrayers;
+          updates.prayerTime = undefined; // Use prayerTimes instead
+        }
+        const updatedReminder = reminderService.updateReminder(editingReminder.id, updates);
         if (updatedReminder) {
           setReminders(reminders.map(r => r.id === editingReminder.id ? updatedReminder : r));
         }
@@ -461,17 +644,13 @@ const WirdsScreen: React.FC = () => {
       } else {
         // Create new reminder(s)
         if (reminderToSave.type === 'prayer' && reminderToSave.selectedPrayers.length > 0) {
-          // Create a separate reminder for each selected prayer
-          const createdReminders: WirdReminder[] = [];
-          for (const prayerTime of reminderToSave.selectedPrayers) {
-            const reminder = reminderService.createReminder({
-              ...reminderToSave,
-              prayerTime,
-            });
-            createdReminders.push(reminder);
-          }
-          setReminders([...reminders, ...createdReminders]);
-          Alert.alert('Success', `Created ${createdReminders.length} reminder(s) successfully!`);
+          // Create ONE reminder with all selected prayer times
+          const reminder = reminderService.createReminder({
+            ...reminderToSave,
+            prayerTimes: reminderToSave.selectedPrayers,
+          });
+          setReminders([...reminders, reminder]);
+          Alert.alert('Success', 'Reminder created successfully!');
         } else {
           // Single reminder for other types
           const reminder = reminderService.createReminder(reminderToSave);
@@ -507,7 +686,11 @@ const WirdsScreen: React.FC = () => {
         dayOfMonth: reminder.dayOfMonth || 1,
         month: reminder.month || 1,
         prayerTime: reminder.prayerTime || 'Fajr',
-        selectedPrayers: reminder.prayerTime ? [reminder.prayerTime] : [],
+        selectedPrayers: (reminder.prayerTimes && reminder.prayerTimes.length > 0)
+          ? reminder.prayerTimes
+          : reminder.prayerTime ? [reminder.prayerTime] : [],
+        selectedDaysOfWeek: reminder.daysOfWeek || [],
+        selectedDaysOfMonth: reminder.daysOfMonth || [],
         isActive: reminder.isActive,
         imageUrl: reminder.imageUrl || '',
         fileUrl: reminder.fileUrl || '',
@@ -515,10 +698,19 @@ const WirdsScreen: React.FC = () => {
         completedDates: reminder.completedDates || [],
         streakCount: reminder.streakCount || 0,
         totalCompletions: reminder.totalCompletions || 0,
+        isHijriYearly: reminder.isHijriYearly,
+        isHijriMonthly: reminder.isHijriMonthly,
       };
       
       setNewReminder(updatedReminder);
-      
+      // For yearly Hijri reminders, set date picker state
+      if (reminder.type === 'yearly' && reminder.isHijriYearly) {
+        setDatePickerType('hijri');
+        setHijriMonth(reminder.month || 1);
+        setHijriDay(reminder.dayOfMonth || 1);
+      } else {
+        setDatePickerType('gregorian');
+      }
       // Update time picker value to match the reminder's time
       const timeValue = timeStringToDate(normalizedTime);
       console.log('Setting time picker value to:', timeValue);
@@ -558,6 +750,10 @@ const WirdsScreen: React.FC = () => {
     if (timePickerVisible) {
       setTimePickerVisible(false);
     }
+    setShowDatePicker(false);
+    setDatePickerType('gregorian');
+    setHijriMonth(1);
+    setHijriDay(1);
     setEditingReminder(null);
     setSelectedImage(null);
     setSelectedFile(null);
@@ -572,6 +768,8 @@ const WirdsScreen: React.FC = () => {
       month: 1,
       prayerTime: 'Fajr',
       selectedPrayers: [],
+      selectedDaysOfWeek: [],
+      selectedDaysOfMonth: [],
       isActive: true,
       imageUrl: '',
       fileUrl: '',
@@ -608,74 +806,53 @@ const WirdsScreen: React.FC = () => {
     }
   };
 
-  // Example reminders definitions
-  const getExampleReminders = () => [
-    {
-      title: 'Read 100 Astagfirullah/Salawat',
-      description: 'Read 100 Astagfirullah or Salawat daily',
-      category: 'dhikr' as WirdReminder['category'],
-      type: 'daily' as WirdReminder['type'],
-      time: '09:00',
-    },
-    {
-      title: 'Remember Allah',
-      description: 'Hourly reminder to remember Allah',
-      category: 'dhikr' as WirdReminder['category'],
-      type: 'hourly' as WirdReminder['type'],
-    },
-    {
-      title: 'Read Quran for 15 mins',
-      description: 'Daily reminder to read Quran for 15 minutes',
-      category: 'quran' as WirdReminder['category'],
-      type: 'daily' as WirdReminder['type'],
-      time: '06:00',
-    },
-    {
-      title: 'Morning Dhikr',
-      description: 'Start your day with dhikr',
-      category: 'dhikr' as WirdReminder['category'],
-      type: 'daily' as WirdReminder['type'],
-      time: '05:30',
-    },
-  ];
-
-  const createExampleReminder = (example: any) => {
-    const reminder = reminderService.createReminder({
-      ...example,
-      isActive: true,
-    });
-    setReminders([...reminders, reminder]);
-    return reminder;
-  };
-
-  const createAllExampleReminders = () => {
-    const examples = getExampleReminders();
-    const created = examples.map(example => reminderService.createReminder({
-      ...example,
-      isActive: true,
-    }));
-    setReminders([...reminders, ...created]);
-    loadReminders();
-    Alert.alert('Success', `Created ${created.length} example reminder(s)!`);
-  };
-
   const renderReminderSchedule = (reminder: WirdReminder) => {
     switch (reminder.type) {
-      case 'prayer':
-        return `At ${reminder.prayerTime} prayer time`;
-      case 'daily':
+      case 'prayer': {
+        const prayers = reminder.prayerTimes && reminder.prayerTimes.length > 0
+          ? reminder.prayerTimes
+          : reminder.prayerTime ? [reminder.prayerTime] : [];
+        if (prayers.length === 0) return 'At prayer time';
+        const allPrayers: (keyof PrayerTimes)[] = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+        const isAll = prayers.length === allPrayers.length && allPrayers.every(p => prayers.includes(p));
+        if (isAll) return 'At all prayer times';
+        return `At ${prayers.join(' and ')}`;
+      }
+      case 'daily': {
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        if (reminder.daysOfWeek && reminder.daysOfWeek.length > 0) {
+          if (reminder.daysOfWeek.length === 7) return `Every day at ${reminder.time}`;
+          const sorted = [...reminder.daysOfWeek].sort();
+          return `${sorted.map(d => dayNames[d]).join(', ')} at ${reminder.time}`;
+        }
         return `Daily at ${reminder.time}`;
-      case 'weekly':
+      }
+      case 'weekly': {
         const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         return `Weekly on ${weekdays[reminder.dayOfWeek || 0]}`;
-      case 'monthly':
-        return `Monthly on day ${reminder.dayOfMonth}`;
-      case 'yearly':
+      }
+      case 'monthly': {
+        const calLabel = reminder.isHijriMonthly ? ' (Hijri)' : '';
+        if (reminder.daysOfMonth && reminder.daysOfMonth.length > 0) {
+          const sorted = [...reminder.daysOfMonth].sort((a, b) => a - b);
+          if (sorted.length <= 3) {
+            return `Monthly on day ${sorted.join(', ')}${calLabel}`;
+          }
+          return `Monthly on ${sorted.length} days${calLabel}`;
+        }
+        return `Monthly on day ${reminder.dayOfMonth}${calLabel}`;
+      }
+      case 'yearly': {
+        if (reminder.isHijriYearly) {
+          const hijriMonths = ['Muharram', 'Safar', 'Rabi al-Awwal', 'Rabi al-Thani', 'Jumada al-Awwal', 'Jumada al-Thani', 'Rajab', 'Shaban', 'Ramadan', 'Shawwal', 'Dhu al-Qadah', 'Dhu al-Hijjah'];
+          return `Yearly on ${hijriMonths[(reminder.month || 1) - 1]} ${reminder.dayOfMonth}`;
+        }
         const months = [
           'January', 'February', 'March', 'April', 'May', 'June',
           'July', 'August', 'September', 'October', 'November', 'December'
         ];
         return `Yearly on ${months[(reminder.month || 1) - 1]} ${reminder.dayOfMonth}`;
+      }
       case 'hourly':
         return 'Every hour';
       default:
@@ -708,74 +885,64 @@ const WirdsScreen: React.FC = () => {
             </View>
           </TouchableOpacity>
 
-          {/* Example Reminders */}
-          {reminders.length === 0 && (
-            <View style={dynamicStyles.exampleSection}>
-              <View style={dynamicStyles.exampleSectionHeader}>
-                <View style={dynamicStyles.sectionTitleContainer}>
-                  <Text style={dynamicStyles.sectionTitleIcon}>○</Text>
-                  <Text style={dynamicStyles.sectionTitle}>Example Reminders</Text>
-                </View>
-                <TouchableOpacity
-                  style={dynamicStyles.addAllButton}
-                  onPress={createAllExampleReminders}
-                  activeOpacity={0.7}
-                >
-                  <Text style={dynamicStyles.addAllButtonText}>Add All</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={dynamicStyles.exampleSubtitle}>Tap to create these reminders</Text>
-              
-              {getExampleReminders().map((example, index) => {
-                const categoryColors = {
-                  dhikr: '#FFF5F5',
-                  quran: '#F0F9FF',
-                  dua: '#F5F0FF',
-                  other: '#F5F5F5',
-                };
-                const categoryBorders = {
-                  dhikr: '#FFE5E5',
-                  quran: '#E0F2FE',
-                  dua: '#E9D5FF',
-                  other: '#E5E5E5',
-                };
-                const categoryIcons = {
-                  dhikr: '○',
-                  quran: '○',
-                  dua: '○',
-                  other: '○',
-                };
-                const cardBg = categoryColors[example.category] || categoryColors.other;
-                const cardBorder = categoryBorders[example.category] || categoryBorders.other;
-                const icon = categoryIcons[example.category] || '○';
+          {/* Type Filter */}
+          <View style={dynamicStyles.filterSection}>
+            <Text style={dynamicStyles.sectionTitle}>Filter by Type</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={dynamicStyles.filterScroll}>
+              <TouchableOpacity
+                style={[dynamicStyles.filterButton, selectedTypeFilter === 'all' && dynamicStyles.filterButtonActive]}
+                onPress={() => setSelectedTypeFilter('all')}
+              >
+                <Text style={[dynamicStyles.filterButtonText, selectedTypeFilter === 'all' && dynamicStyles.filterButtonTextActive]}>
+                  All ({reminders.length})
+                </Text>
+              </TouchableOpacity>
+              {(['daily', 'weekly', 'monthly', 'yearly', 'hourly', 'prayer'] as const).map((type) => {
+                const count = reminders.filter(r => r.type === type).length;
+                if (count === 0) return null;
                 return (
                   <TouchableOpacity
-                    key={index}
-                    style={[
-                      dynamicStyles.exampleCard,
-                      { backgroundColor: cardBg, borderColor: cardBorder }
-                    ]}
-                    onPress={() => {
-                      createExampleReminder(example);
-                      Alert.alert('Success', 'Example reminder created!');
-                    }}
-                    activeOpacity={0.7}
+                    key={type}
+                    style={[dynamicStyles.filterButton, selectedTypeFilter === type && dynamicStyles.filterButtonActive]}
+                    onPress={() => setSelectedTypeFilter(type)}
                   >
-                    <View style={dynamicStyles.exampleCardHeader}>
-                      <View style={[dynamicStyles.exampleCardIconContainer, { borderColor: getCategoryColor(example.category) }]}>
-                        <Text style={[dynamicStyles.exampleCardIcon, { color: getCategoryColor(example.category) }]}>{icon}</Text>
-                      </View>
-                      <View style={[dynamicStyles.categoryBadgeExample, { backgroundColor: getCategoryColor(example.category) }]}>
-                        <Text style={dynamicStyles.categoryBadgeText}>{getCategoryLabel(example.category)}</Text>
-                      </View>
-                    </View>
-                    <Text style={dynamicStyles.exampleCardTitle}>{example.title}</Text>
-                    <Text style={dynamicStyles.exampleCardDesc}>{example.description}</Text>
+                    <Text style={[dynamicStyles.filterButtonText, selectedTypeFilter === type && dynamicStyles.filterButtonTextActive]}>
+                      {renderReminderTypeLabel(type)} ({count})
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
-            </View>
-          )}
+            </ScrollView>
+          </View>
+
+          {/* Category Filter */}
+          <View style={dynamicStyles.filterSection}>
+            <Text style={dynamicStyles.sectionTitle}>Filter by Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={dynamicStyles.filterScroll}>
+              <TouchableOpacity
+                style={[dynamicStyles.filterButton, selectedCategoryFilter === 'all' && dynamicStyles.filterButtonActive]}
+                onPress={() => setSelectedCategoryFilter('all')}
+              >
+                <Text style={[dynamicStyles.filterButtonText, selectedCategoryFilter === 'all' && dynamicStyles.filterButtonTextActive]}>
+                  All ({reminders.length})
+                </Text>
+              </TouchableOpacity>
+              {(['quran', 'dhikr', 'dua', 'other'] as const).map((cat) => {
+                const count = reminders.filter(r => (r.category || 'other') === cat).length;
+                return (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[dynamicStyles.filterButton, selectedCategoryFilter === cat && dynamicStyles.filterButtonActive]}
+                    onPress={() => setSelectedCategoryFilter(cat)}
+                  >
+                    <Text style={[dynamicStyles.filterButtonText, selectedCategoryFilter === cat && dynamicStyles.filterButtonTextActive]}>
+                      {getCategoryLabel(cat)} ({count})
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
 
           {/* Prayer Time Filter */}
           {reminders.some(r => r.type === 'prayer') && (
@@ -798,7 +965,9 @@ const WirdsScreen: React.FC = () => {
                 </TouchableOpacity>
                 {(['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'] as Array<keyof PrayerTimes>).map((prayerName) => {
                   const count = reminders.filter(
-                    r => r.type === 'prayer' && r.prayerTime === prayerName
+                    r => r.type === 'prayer' && (
+                      (r.prayerTimes && r.prayerTimes.includes(prayerName)) || r.prayerTime === prayerName
+                    )
                   ).length;
                   if (count === 0) return null;
 
@@ -830,7 +999,9 @@ const WirdsScreen: React.FC = () => {
               <Text style={dynamicStyles.sectionTitle}>📿 Wird Sessions by Prayer</Text>
               {(['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'] as Array<keyof PrayerTimes>).map((prayerName) => {
                 const prayerReminders = reminders.filter(
-                  r => r.type === 'prayer' && r.prayerTime === prayerName && r.isActive
+                  r => r.type === 'prayer' && r.isActive && (
+                    (r.prayerTimes && r.prayerTimes.includes(prayerName)) || r.prayerTime === prayerName
+                  )
                 );
                 if (prayerReminders.length === 0) return null;
 
@@ -844,7 +1015,7 @@ const WirdsScreen: React.FC = () => {
                     }}
                   >
                     <Text style={dynamicStyles.sessionButtonText}>
-                      {prayerName} - {prayerReminders.length} wird{prayerReminders.length > 1 ? 's' : ''}
+                      {prayerName} - {prayerReminders.length}
                     </Text>
                     <Text style={dynamicStyles.sessionButtonArrow}>→</Text>
                   </TouchableOpacity>
@@ -854,10 +1025,25 @@ const WirdsScreen: React.FC = () => {
           )}
 
           {(() => {
-            // Filter reminders based on selected prayer filter
-            const filteredReminders = selectedPrayerFilter === 'all' 
-              ? reminders 
-              : reminders.filter(r => r.type === 'prayer' && r.prayerTime === selectedPrayerFilter);
+            // Filter reminders by type, prayer time, and category
+            let filteredReminders = reminders;
+            if (selectedTypeFilter === 'time-based') {
+              filteredReminders = filteredReminders.filter(r =>
+                ['daily', 'weekly', 'monthly', 'yearly', 'hourly'].includes(r.type)
+              );
+            } else if (selectedTypeFilter !== 'all') {
+              filteredReminders = filteredReminders.filter(r => r.type === selectedTypeFilter);
+            }
+            if (selectedPrayerFilter !== 'all') {
+              filteredReminders = filteredReminders.filter(r =>
+                r.type === 'prayer' && (
+                  (r.prayerTimes && r.prayerTimes.includes(selectedPrayerFilter)) || r.prayerTime === selectedPrayerFilter
+                )
+              );
+            }
+            if (selectedCategoryFilter !== 'all') {
+              filteredReminders = filteredReminders.filter(r => (r.category || 'other') === selectedCategoryFilter);
+            }
             
             return filteredReminders.length === 0 ? (
               <View style={dynamicStyles.placeholderCard}>
@@ -865,15 +1051,15 @@ const WirdsScreen: React.FC = () => {
                   <Text style={dynamicStyles.placeholderIcon}>○</Text>
                 </View>
                 <Text style={dynamicStyles.placeholderTitle}>
-                  {selectedPrayerFilter === 'all' ? 'No Reminders Yet' : `No ${selectedPrayerFilter} Wirds`}
+                  {selectedTypeFilter === 'all' && selectedPrayerFilter === 'all' && selectedCategoryFilter === 'all' ? 'No Reminders Yet' : 'No matching reminders'}
                 </Text>
                 <Text style={dynamicStyles.placeholderText}>
-                  {selectedPrayerFilter === 'all' 
+                  {selectedTypeFilter === 'all' && selectedPrayerFilter === 'all' && selectedCategoryFilter === 'all'
                     ? 'Start your spiritual journey by creating your first wird reminder.'
-                    : `Create a wird reminder for ${selectedPrayerFilter} to see it here.`
+                    : 'Try changing the filter or create a new reminder.'
                   }
                 </Text>
-                {selectedPrayerFilter === 'all' && (
+                {(selectedTypeFilter === 'all' && selectedPrayerFilter === 'all' && selectedCategoryFilter === 'all') && (
                   <TouchableOpacity
                     style={dynamicStyles.placeholderCTA}
                     onPress={() => setModalVisible(true)}
@@ -885,14 +1071,14 @@ const WirdsScreen: React.FC = () => {
               </View>
             ) : (
             <View style={dynamicStyles.remindersContainer}>
-              {selectedPrayerFilter !== 'all' && (
+              {(selectedTypeFilter !== 'all' || selectedPrayerFilter !== 'all' || selectedCategoryFilter !== 'all') && (
                 <View style={dynamicStyles.filterHeader}>
                   <Text style={dynamicStyles.filterHeaderText}>
-                    📿 {selectedPrayerFilter} Wirds ({filteredReminders.length})
+                    {filteredReminders.length} reminder{filteredReminders.length !== 1 ? 's' : ''}
                   </Text>
                   <TouchableOpacity
                     style={dynamicStyles.clearFilterButton}
-                    onPress={() => setSelectedPrayerFilter('all')}
+                    onPress={() => { setSelectedTypeFilter('all'); setSelectedPrayerFilter('all'); setSelectedCategoryFilter('all'); }}
                   >
                     <Text style={dynamicStyles.clearFilterButtonText}>Show All</Text>
                   </TouchableOpacity>
@@ -929,6 +1115,44 @@ const WirdsScreen: React.FC = () => {
                     {renderReminderSchedule(reminder)}
                   </Text>
 
+                  {/* Attachment preview - tap to open full reminder */}
+                  {(reminder.imageUrl || reminder.linkUrl || reminder.fileUrl) && (
+                    <View style={dynamicStyles.attachmentPreviewRow}>
+                      {reminder.imageUrl && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setViewingReminderImageError(false);
+                            setViewingReminder(reminder);
+                            setViewModalVisible(true);
+                          }}
+                          style={dynamicStyles.attachmentThumbnail}
+                        >
+                          <LocalImage
+                            uri={reminder.imageUrl}
+                            style={dynamicStyles.attachmentThumbnailImage}
+                            resizeMode="cover"
+                          />
+                        </TouchableOpacity>
+                      )}
+                      {reminder.linkUrl && !reminder.imageUrl && (
+                        <TouchableOpacity
+                          onPress={() => Linking.openURL(reminder.linkUrl!)}
+                          style={dynamicStyles.attachmentLinkChip}
+                        >
+                          <Text style={dynamicStyles.attachmentLinkChipText}>🔗 Link</Text>
+                        </TouchableOpacity>
+                      )}
+                      {reminder.fileUrl && (
+                        <TouchableOpacity
+                          onPress={() => Linking.openURL(reminder.fileUrl!)}
+                          style={dynamicStyles.attachmentLinkChip}
+                        >
+                          <Text style={dynamicStyles.attachmentLinkChipText}>📄 File</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+
                   {/* Progress Tracking */}
                   <View style={dynamicStyles.progressContainer}>
                     <View style={dynamicStyles.progressRow}>
@@ -949,6 +1173,18 @@ const WirdsScreen: React.FC = () => {
                         {isCompletedToday(reminder) ? '✓ Completed Today' : 'Mark Complete'}
                       </Text>
                     </TouchableOpacity>
+                    {(reminder.imageUrl || reminder.linkUrl || reminder.fileUrl) && (
+                      <TouchableOpacity
+                        style={dynamicStyles.viewReminderButton}
+                        onPress={() => {
+                          setViewingReminderImageError(false);
+                          setViewingReminder(reminder);
+                          setViewModalVisible(true);
+                        }}
+                      >
+                        <Text style={dynamicStyles.viewReminderButtonText}>View Reminder</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                   
                   <View style={dynamicStyles.reminderActions}>
@@ -1270,7 +1506,7 @@ const WirdsScreen: React.FC = () => {
             <View style={dynamicStyles.typeSelector}>
               <Text style={dynamicStyles.label}>Reminder Type:</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {(['prayer', 'daily', 'weekly', 'monthly', 'yearly', 'hourly'] as const).map((type) => (
+                {(['hourly', 'prayer', 'daily', 'weekly', 'monthly', 'yearly'] as const).map((type) => (
                   <TouchableOpacity
                     key={type}
                     style={[
@@ -1335,19 +1571,53 @@ const WirdsScreen: React.FC = () => {
             )}
 
             {newReminder.type === 'daily' && (
-              <View style={dynamicStyles.fieldGroup}>
-                <Text style={dynamicStyles.label}>Time:</Text>
-                <TouchableOpacity
-                  style={[dynamicStyles.input, dynamicStyles.timePickerInput]}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    console.log('Time picker button pressed. Current time:', newReminder.time);
-                    openTimePicker();
-                  }}
-                >
-                  <Text style={dynamicStyles.timePickerText}>{normalizeTimeString(newReminder.time)}</Text>
-                </TouchableOpacity>
-              </View>
+              <>
+                <View style={dynamicStyles.fieldGroup}>
+                  <Text style={dynamicStyles.label}>Days (optional - leave empty for every day):</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => {
+                      const isSelected = newReminder.selectedDaysOfWeek.includes(index);
+                      return (
+                        <TouchableOpacity
+                          key={day}
+                          style={[
+                            dynamicStyles.dayOption,
+                            isSelected && dynamicStyles.dayOptionSelected
+                          ]}
+                          onPress={() => {
+                            const selected = newReminder.selectedDaysOfWeek;
+                            if (isSelected) {
+                              setNewReminder({ ...newReminder, selectedDaysOfWeek: selected.filter(d => d !== index) });
+                            } else {
+                              setNewReminder({ ...newReminder, selectedDaysOfWeek: [...selected, index] });
+                            }
+                          }}
+                        >
+                          <Text style={[
+                            dynamicStyles.dayOptionText,
+                            isSelected && dynamicStyles.dayOptionTextSelected
+                          ]}>
+                            {day} {isSelected && '✓'}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+                <View style={dynamicStyles.fieldGroup}>
+                  <Text style={dynamicStyles.label}>Time:</Text>
+                  <TouchableOpacity
+                    style={[dynamicStyles.input, dynamicStyles.timePickerInput]}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      console.log('Time picker button pressed. Current time:', newReminder.time);
+                      openTimePicker();
+                    }}
+                  >
+                    <Text style={dynamicStyles.timePickerText}>{normalizeTimeString(newReminder.time)}</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
             )}
 
             {newReminder.type === 'weekly' && (
@@ -1392,17 +1662,58 @@ const WirdsScreen: React.FC = () => {
             )}
 
             {newReminder.type === 'monthly' && (
-              <View style={dynamicStyles.fieldGroup}>
-                <Text style={dynamicStyles.label}>Day of Month:</Text>
-                <TouchableOpacity
-                  style={dynamicStyles.timeButton}
-                  onPress={() => setShowDatePicker(true)}
-                >
-                  <Text style={dynamicStyles.timeButtonText}>
-                    Day {newReminder.dayOfMonth}
+              <>
+                <View style={dynamicStyles.fieldGroup}>
+                  <Text style={dynamicStyles.label}>Calendar:</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                      style={[dynamicStyles.typeOption, !newReminder.isHijriMonthly && dynamicStyles.typeOptionSelected]}
+                      onPress={() => setNewReminder({ ...newReminder, isHijriMonthly: false })}
+                    >
+                      <Text style={[dynamicStyles.typeOptionText, !newReminder.isHijriMonthly && dynamicStyles.typeOptionTextSelected]}>Gregorian</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[dynamicStyles.typeOption, newReminder.isHijriMonthly && dynamicStyles.typeOptionSelected]}
+                      onPress={() => setNewReminder({ ...newReminder, isHijriMonthly: true })}
+                    >
+                      <Text style={[dynamicStyles.typeOptionText, newReminder.isHijriMonthly && dynamicStyles.typeOptionTextSelected]}>Hijri</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View style={dynamicStyles.fieldGroup}>
+                  <Text style={dynamicStyles.label}>
+                    {newReminder.isHijriMonthly ? 'Hijri Days (tap to select)' : 'Days of Month (tap to select)'}:
                   </Text>
-                </TouchableOpacity>
-              </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {Array.from({ length: newReminder.isHijriMonthly ? 30 : 31 }, (_, i) => i + 1).map((day) => {
+                      const isSelected = newReminder.selectedDaysOfMonth.includes(day);
+                      return (
+                        <TouchableOpacity
+                          key={day}
+                          style={[dynamicStyles.dayOption, isSelected && dynamicStyles.dayOptionSelected]}
+                          onPress={() => {
+                            const selected = newReminder.selectedDaysOfMonth;
+                            if (isSelected) {
+                              setNewReminder({ ...newReminder, selectedDaysOfMonth: selected.filter(d => d !== day), dayOfMonth: day });
+                            } else {
+                              setNewReminder({ ...newReminder, selectedDaysOfMonth: [...selected, day], dayOfMonth: day });
+                            }
+                          }}
+                        >
+                          <Text style={[dynamicStyles.dayOptionText, isSelected && dynamicStyles.dayOptionTextSelected]}>
+                            {day}{isSelected ? ' ✓' : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                  {newReminder.selectedDaysOfMonth.length > 0 && (
+                    <Text style={{ fontSize: 12, color: '#6C5CE7', marginTop: 6, fontWeight: '500' }}>
+                      Selected: {newReminder.selectedDaysOfMonth.sort((a, b) => a - b).join(', ')}
+                    </Text>
+                  )}
+                </View>
+              </>
             )}
 
             {newReminder.type === 'yearly' && (
@@ -1413,7 +1724,9 @@ const WirdsScreen: React.FC = () => {
                   onPress={() => setShowDatePicker(true)}
                 >
                   <Text style={dynamicStyles.timeButtonText}>
-                    {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][newReminder.month - 1]} {newReminder.dayOfMonth}
+                    {datePickerType === 'hijri'
+                      ? `${['Muharram', 'Safar', 'Rabi I', 'Rabi II', 'Jumada I', 'Jumada II', 'Rajab', 'Shaban', 'Ramadan', 'Shawwal', 'Dhu al-Qadah', 'Dhu al-Hijjah'][hijriMonth - 1]} ${hijriDay}`
+                      : `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][newReminder.month - 1]} ${newReminder.dayOfMonth}`}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1672,81 +1985,71 @@ const WirdsScreen: React.FC = () => {
 
       {/* iOS time picker is now rendered inside the main modal above */}
 
-      {/* Beautiful Notification Detail Modal */}
+      {/* View Reminder Modal - Full-screen like Wird Sessions by Prayer */}
       <Modal
         visible={viewModalVisible}
-        animationType="fade"
-        transparent={true}
+        animationType="slide"
+        transparent={false}
         onRequestClose={() => setViewModalVisible(false)}
       >
-        <TouchableOpacity
-          style={dynamicStyles.notificationModalOverlay}
-          activeOpacity={1}
-          onPress={() => setViewModalVisible(false)}
-        >
-          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
-            <View style={dynamicStyles.notificationModalContent}>
+        <View style={dynamicStyles.viewReminderContainer}>
+          <View style={dynamicStyles.viewReminderFixedHeader}>
+            <Text style={dynamicStyles.viewReminderHeaderText}>View Reminder</Text>
+            <TouchableOpacity
+              onPress={() => setViewModalVisible(false)}
+              style={dynamicStyles.viewReminderCloseButton}
+              activeOpacity={0.7}
+            >
+              <Text style={dynamicStyles.viewReminderCloseButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={dynamicStyles.viewReminderScroll} showsVerticalScrollIndicator={false}>
+            <View style={dynamicStyles.viewReminderCard}>
               {viewingReminder && (
                 <>
-                  {/* Header with Close Button */}
-                  <View style={dynamicStyles.notificationHeader}>
-                    <TouchableOpacity
-                      onPress={() => setViewModalVisible(false)}
-                      style={dynamicStyles.notificationCloseButton}
-                    >
-                      <Text style={dynamicStyles.notificationCloseButtonText}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Image Section - Large and Beautiful */}
+                  {/* Image Section - Full width like WirdSwipeViewer */}
                   {viewingReminder.imageUrl ? (
                     <TouchableOpacity
                       activeOpacity={0.9}
                       onPress={() => {
-                        if (viewingReminder.imageUrl) {
-                          setFullScreenImage(viewingReminder.imageUrl);
+                        const uriToShow = resolvedImageUri || (viewingReminder.imageUrl?.startsWith('http') ? viewingReminder.imageUrl : null);
+                        if (uriToShow && !viewingReminderImageError) {
+                          setFullScreenImage(uriToShow);
                         }
                       }}
-                      style={dynamicStyles.notificationImageContainer}
+                      style={dynamicStyles.viewReminderImageContainer}
                     >
-                      <Image
-                        source={{ uri: viewingReminder.imageUrl }}
-                        style={dynamicStyles.notificationImage}
-                        resizeMode="cover"
-                        onError={(error) => {
-                          console.error('❌ Error loading notification image:', error?.nativeEvent?.error ?? error);
-                          console.error('❌ Image URL:', viewingReminder.imageUrl);
-                          console.error('❌ Image URL type:', typeof viewingReminder.imageUrl);
-                          console.error('❌ Image URL length:', viewingReminder.imageUrl?.length);
-                          console.error('❌ Full reminder object:', JSON.stringify(viewingReminder, null, 2));
-                        }}
-                        onLoadStart={() => {
-                          console.log('🔄 Starting to load notification image:', viewingReminder.imageUrl);
-                        }}
-                        onLoad={() => {
-                          console.log('✅ Notification image loaded successfully:', viewingReminder.imageUrl);
-                        }}
-                        onLoadEnd={() => {
-                          console.log('🏁 Image load ended:', viewingReminder.imageUrl);
-                        }}
-                      />
+                      {viewingReminderImageError ? (
+                        <View style={dynamicStyles.viewReminderImagePlaceholder}>
+                          <Text style={dynamicStyles.viewReminderImagePlaceholderText}>📷</Text>
+                          <Text style={[dynamicStyles.viewReminderImagePlaceholderText, { fontSize: 14 }]}>Image unavailable</Text>
+                        </View>
+                      ) : (resolvedImageUri || viewingReminder.imageUrl?.startsWith('http')) ? (
+                        <Image
+                          key={resolvedImageUri || viewingReminder.imageUrl}
+                          source={{ uri: resolvedImageUri || viewingReminder.imageUrl! }}
+                          style={dynamicStyles.viewReminderImage}
+                          resizeMode="contain"
+                          onError={() => setViewingReminderImageError(true)}
+                          onLoad={() => setViewingReminderImageError(false)}
+                        />
+                      ) : (
+                        <View style={dynamicStyles.viewReminderImagePlaceholder}>
+                          <Text style={[dynamicStyles.viewReminderImagePlaceholderText, { fontSize: 14 }]}>Loading image...</Text>
+                        </View>
+                      )}
                     </TouchableOpacity>
                   ) : null}
 
-                  <ScrollView 
-                    style={dynamicStyles.notificationScrollContent}
-                    showsVerticalScrollIndicator={false}
-                  >
+                  <View style={dynamicStyles.viewReminderContent}>
                     {/* Title - Large and Prominent */}
-                    <Text style={dynamicStyles.notificationTitle}>{viewingReminder.title}</Text>
+                    <Text style={dynamicStyles.viewReminderTitle}>{viewingReminder.title}</Text>
 
-                    {/* Time - Beautifully Formatted */}
-                    {viewingReminder.time && (
-                      <View style={dynamicStyles.notificationTimeContainer}>
-                        <Text style={dynamicStyles.notificationTimeIcon}>🕐</Text>
-                        <Text style={dynamicStyles.notificationTime}>{viewingReminder.time}</Text>
-                      </View>
-                    )}
+                    {/* Schedule - shows correct info per type */}
+                    <View style={dynamicStyles.notificationTimeContainer}>
+                      <Text style={dynamicStyles.notificationTimeIcon}>🕐</Text>
+                      <Text style={dynamicStyles.notificationTime}>{renderReminderSchedule(viewingReminder)}</Text>
+                    </View>
 
                     {/* Description */}
                     {viewingReminder.description && (
@@ -1775,17 +2078,16 @@ const WirdsScreen: React.FC = () => {
                       </TouchableOpacity>
                     )}
 
-                    {/* File Section */}
+                    {/* File Section - use direct openURL (canOpenURL returns false for file:// on iOS) */}
                     {viewingReminder.fileUrl && (
                       <TouchableOpacity
                         style={dynamicStyles.notificationLinkButton}
                         onPress={async () => {
                           if (viewingReminder.fileUrl) {
-                            const canOpen = await Linking.canOpenURL(viewingReminder.fileUrl);
-                            if (canOpen) {
+                            try {
                               await Linking.openURL(viewingReminder.fileUrl);
-                            } else {
-                              Alert.alert('Cannot Open File', viewingReminder.fileUrl);
+                            } catch {
+                              Alert.alert('Cannot Open File', 'This file could not be opened.');
                             }
                           }
                         }}
@@ -1794,26 +2096,26 @@ const WirdsScreen: React.FC = () => {
                         <Text style={dynamicStyles.notificationLinkText}>Open File</Text>
                       </TouchableOpacity>
                     )}
-                  </ScrollView>
+                  </View>
 
                   {/* Done Button */}
-                  <View style={dynamicStyles.notificationActionsContainer}>
+                  <View style={dynamicStyles.viewReminderActionsContainer}>
                     <TouchableOpacity
-                      style={dynamicStyles.notificationDoneButton}
+                      style={dynamicStyles.viewReminderDoneButton}
                       onPress={() => {
                         markAsCompleted(viewingReminder.id, { forceComplete: true });
                         reminderService.markTriggered(viewingReminder.id);
                         setViewModalVisible(false);
                       }}
                     >
-                      <Text style={dynamicStyles.notificationDoneButtonText}>Mark as Done</Text>
+                      <Text style={dynamicStyles.viewReminderDoneButtonText}>Mark as Done</Text>
                     </TouchableOpacity>
                   </View>
                 </>
               )}
             </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </ScrollView>
+        </View>
       </Modal>
 
       {/* Full Screen Image Modal */}
@@ -1848,6 +2150,12 @@ const WirdsScreen: React.FC = () => {
         onClose={() => setSwipeViewerVisible(false)}
         onComplete={(id) => {
           markAsCompleted(id);
+        }}
+        onViewReminder={(reminder) => {
+          setSwipeViewerVisible(false);
+          setViewingReminderImageError(false);
+          setViewingReminder(reminder);
+          setViewModalVisible(true);
         }}
       />
 
@@ -2445,6 +2753,49 @@ const getDynamicStyles = (theme: any, themeMode: 'original' | 'dark' | 'calm' = 
   completeButtonTextCompleted: {
     color: themeMode === 'dark' ? theme.text : 'white',
   },
+  attachmentPreviewRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  attachmentThumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  attachmentThumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  attachmentLinkChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: theme.primary + '20',
+    alignSelf: 'flex-start',
+  },
+  attachmentLinkChipText: {
+    fontSize: 13,
+    color: theme.primary,
+    fontWeight: '500',
+  },
+  viewReminderButton: {
+    marginTop: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: theme.primary,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  viewReminderButtonText: {
+    fontSize: 15,
+    color: 'white',
+    fontWeight: '600',
+  },
   viewText: {
     fontSize: 16,
     color: theme.text,
@@ -2863,71 +3214,110 @@ const getDynamicStyles = (theme: any, themeMode: 'original' | 'dark' | 'calm' = 
     fontWeight: '600',
     color: theme.text,
   },
-  // Beautiful Notification Modal Styles
-  notificationModalOverlay: {
+  // View Reminder Modal - Full-screen like WirdSwipeViewer
+  viewReminderContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: '#F0F0EC',
+  },
+  viewReminderFixedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 10,
+    backgroundColor: '#F0F0EC',
+    zIndex: 1000,
+    elevation: 5,
+  },
+  viewReminderHeaderText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4A90E2',
+  },
+  viewReminderCloseButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E74C3C',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 1001,
+    elevation: 6,
+  },
+  viewReminderCloseButtonText: {
+    fontSize: 24,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  viewReminderScroll: {
+    flex: 1,
+  },
+  viewReminderCard: {
+    flex: 1,
     padding: 20,
   },
-  notificationModalContent: {
-    backgroundColor: theme.card,
-    borderRadius: 24,
-    width: '100%',
-    maxWidth: 500,
-    maxHeight: '90%',
-    overflow: 'hidden',
+  viewReminderContent: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 24,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  notificationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    padding: 16,
-    paddingBottom: 8,
+  viewReminderTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#2C3E50',
+    marginBottom: 16,
+    textAlign: 'center',
   },
-  notificationCloseButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  notificationCloseButtonText: {
-    fontSize: 20,
-    color: theme.text,
-    fontWeight: '600',
-  },
-  notificationImageContainer: {
+  viewReminderImageContainer: {
     width: '100%',
-    height: 250,
-    backgroundColor: '#f0f0f0',
+    height: 500,
+    backgroundColor: themeMode === 'dark' ? '#2a2a2a' : '#f0f0f0',
     overflow: 'hidden',
     borderRadius: 12,
-    marginBottom: 16,
+    marginVertical: 20,
   },
-  notificationImage: {
+  viewReminderImage: {
     width: '100%',
-    height: 250,
-    backgroundColor: '#e0e0e0',
+    height: 500,
+    backgroundColor: themeMode === 'dark' ? '#2a2a2a' : '#e0e0e0',
   },
-  notificationImagePlaceholder: {
+  viewReminderImagePlaceholder: {
     width: '100%',
     height: '100%',
     backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  notificationImagePlaceholderText: {
+  viewReminderImagePlaceholderText: {
     fontSize: 48,
     color: '#999',
     marginBottom: 8,
+  },
+  viewReminderActionsContainer: {
+    marginTop: 20,
+  },
+  viewReminderDoneButton: {
+    backgroundColor: '#27AE60',
+    paddingVertical: 18,
+    borderRadius: 16,
+    alignItems: 'center',
+    shadowColor: '#27AE60',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  viewReminderDoneButtonText: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
   notificationActionsContainer: {
     padding: 24,

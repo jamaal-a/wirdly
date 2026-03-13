@@ -6,7 +6,6 @@ import { RootTabParamList } from '../types';
 import HomeScreen from '../screens/HomeScreen';
 import WirdsScreen from '../screens/WirdsScreen';
 import TasbeehScreen from '../screens/TasbeehScreen';
-import PrayerHistoryScreen from '../screens/PrayerHistoryScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import { themeService } from '../services/themeService';
 import { settingsService } from '../services/settingsService';
@@ -91,16 +90,6 @@ const TabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="History"
-        component={PrayerHistoryScreen}
-        options={{
-          tabBarLabel: 'Times',
-          tabBarIcon: ({ color, focused, size }) => (
-            <TabIcon type="times" color={color} focused={focused} size={size} />
-          ),
-        }}
-      />
-      <Tab.Screen
         name="Settings"
         component={SettingsScreen}
         options={{
@@ -153,7 +142,7 @@ const AnimatedTabButton: React.FC<any> = ({ children, onPress, accessibilityStat
 };
 
 // Tab icon component with outline/filled styles
-const TabIcon: React.FC<{ type: 'wirds' | 'salah' | 'tasbeeh' | 'times' | 'settings'; color: string; focused: boolean; size: number }> = ({ 
+const TabIcon: React.FC<{ type: 'wirds' | 'salah' | 'tasbeeh' | 'settings'; color: string; focused: boolean; size: number }> = ({ 
   type, 
   color, 
   focused, 
@@ -231,32 +220,6 @@ const TabIcon: React.FC<{ type: 'wirds' | 'salah' | 'tasbeeh' | 'times' | 'setti
                 <Circle cx="14" cy="10" r="1" fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
                 <Circle cx="10" cy="14" r="1" fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
                 <Circle cx="14" cy="14" r="1" fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
-              </>
-            )}
-          </Svg>
-        );
-      
-      case 'times':
-        // Calendar icon
-        return (
-          <Svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none">
-            {focused ? (
-              <>
-                <Rect x="4" y="6" width="16" height="14" rx="2" fill={fillColor} />
-                <Path d="M4 10H20" stroke={focused ? 'white' : color} strokeWidth={1.5} />
-                <Circle cx="8" cy="14" r="1" fill={focused ? 'white' : color} />
-                <Circle cx="12" cy="14" r="1" fill={focused ? 'white' : color} />
-                <Circle cx="16" cy="14" r="1" fill={focused ? 'white' : color} />
-                <Path d="M8 2V6M16 2V6" stroke={focused ? 'white' : color} strokeWidth={1.5} strokeLinecap="round" />
-              </>
-            ) : (
-              <>
-                <Rect x="4" y="6" width="16" height="14" rx="2" fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
-                <Path d="M4 10H20" stroke={strokeColor} strokeWidth={strokeWidth} />
-                <Circle cx="8" cy="14" r="1" fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
-                <Circle cx="12" cy="14" r="1" fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
-                <Circle cx="16" cy="14" r="1" fill="none" stroke={strokeColor} strokeWidth={strokeWidth} />
-                <Path d="M8 2V6M16 2V6" stroke={strokeColor} strokeWidth={strokeWidth} strokeLinecap="round" />
               </>
             )}
           </Svg>

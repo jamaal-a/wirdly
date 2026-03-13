@@ -9,10 +9,12 @@ import {
   RefreshControl,
   TouchableOpacity,
   Animated,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { PrayerTimes, Location as LocationType, IslamicDate } from '../types';
-import { fetchPrayerTimes } from '../services/prayerTimesService';
+import { PrayerTimes, PrayerTimeData, Location as LocationType, IslamicDate } from '../types';
+import { fetchPrayerTimes, fetchPrayerTimesByDate } from '../services/prayerTimesService';
 import { getCurrentLocation, getLastKnownLocation } from '../services/locationService';
 import * as ExpoLocation from 'expo-location';
 import { formatTime, getCurrentDate, isCurrentPrayer } from '../utils/formatTime';
@@ -21,6 +23,24 @@ import { notificationService } from '../services/notificationService';
 import { offlineService } from '../services/offlineService';
 import { themeService } from '../services/themeService';
 import { settingsService } from '../services/settingsService';
+
+const CALCULATION_METHODS = [
+  { id: 2, name: 'Islamic Society of North America (ISNA)' },
+  { id: 3, name: 'Muslim World League (MWL)' },
+  { id: 4, name: 'Umm al-Qura, Makkah' },
+  { id: 5, name: 'Egyptian General Authority of Survey' },
+  { id: 1, name: 'University of Islamic Sciences, Karachi' },
+  { id: 14, name: 'Moonsighting Committee (UK/Europe recommended)' },
+  { id: 8, name: 'Gulf Region' },
+  { id: 9, name: 'Kuwait' },
+  { id: 10, name: 'Qatar' },
+  { id: 15, name: 'Dubai (unofficial)' },
+  { id: 13, name: 'Diyanet, Turkey' },
+  { id: 12, name: 'Union Islamique de France' },
+  { id: 11, name: 'Majlis Ugama Islam, Singapore' },
+  { id: 7, name: 'Institute of Geophysics, Tehran' },
+  { id: 0, name: 'Shia Ithna-Ansari' },
+];
 
 const HomeScreen: React.FC = () => {
   const [prayerTimes, setPrayerTimes] = useState<PrayerTimes | null>(null);
@@ -34,6 +54,11 @@ const HomeScreen: React.FC = () => {
   const [nextPrayer, setNextPrayer] = useState<{ name: string; time: string; hoursLeft: number; minutesLeft: number } | null>(null);
   const [cityName, setCityName] = useState<string>('');
   const [timeUntilPrayer, setTimeUntilPrayer] = useState<{ totalMinutes: number; totalSeconds: number } | null>(null);
+  const [showMethodPicker, setShowMethodPicker] = useState(false);
+  const [calculationMethod, setCalculationMethod] = useState(settingsService.getSetting('calculationMethod'));
+  const [showUpcoming, setShowUpcoming] = useState(false);
+  const [upcomingDays, setUpcomingDays] = useState<PrayerTimeData[]>([]);
+  const [upcomingLoading, setUpcomingLoading] = useState(false);
   const theme = themeService.getCurrentTheme();
   const [themeKey, setThemeKey] = useState(0);
 
@@ -195,6 +220,55 @@ const HomeScreen: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [nextPrayer, timeUntilPrayer]);
+
+  const handleMethodChange = (methodId: number) => {
+    setCalculationMethod(methodId);
+    settingsService.updateSetting('calculationMethod', methodId);
+    setShowMethodPicker(false);
+    setShowUpcoming(false);
+    setUpcomingDays([]);
+    loadPrayerTimes(true);
+  };
+
+  const loadUpcomingDays = async () => {
+    if (!location) return;
+    setUpcomingLoading(true);
+    try {
+      const results: PrayerTimeData[] = [];
+      const today = new Date();
+      for (let i = 1; i <= 5; i++) {
+        const date = new Date(today);
+        date.setDate(today.getDate() + i);
+        if (i > 1) await new Promise(r => setTimeout(r, 500));
+        try {
+          const response = await fetchPrayerTimesByDate(date, location, calculationMethod);
+          if (response?.data?.timings) {
+            results.push({
+              date: date.toISOString().split('T')[0],
+              timings: response.data.timings,
+              location,
+              calculationMethod,
+              cachedAt: new Date(),
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to load day', i, e);
+        }
+      }
+      setUpcomingDays(results);
+    } catch (e) {
+      console.error('Error loading upcoming days:', e);
+    } finally {
+      setUpcomingLoading(false);
+    }
+  };
+
+  const toggleUpcoming = () => {
+    if (!showUpcoming && upcomingDays.length === 0) {
+      loadUpcomingDays();
+    }
+    setShowUpcoming(!showUpcoming);
+  };
 
   const getDynamicStyles = () => {
     return StyleSheet.create({
@@ -402,6 +476,120 @@ const HomeScreen: React.FC = () => {
         fontSize: 16,
         fontWeight: '600',
       },
+      methodButton: {
+        marginTop: 12,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        backgroundColor: 'rgba(255,255,255,0.25)',
+        borderRadius: 20,
+      },
+      methodButtonText: {
+        color: 'white',
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
+      },
+      upcomingToggle: {
+        margin: 16,
+        paddingVertical: 16,
+        borderRadius: 12,
+        backgroundColor: theme.card,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+      },
+      upcomingToggleText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: theme.primary,
+      },
+      upcomingCard: {
+        backgroundColor: theme.card,
+        borderRadius: 12,
+        padding: 16,
+        marginHorizontal: 16,
+        marginBottom: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+      },
+      upcomingCardDate: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: theme.text,
+        marginBottom: 12,
+      },
+      upcomingRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 6,
+        paddingHorizontal: 4,
+      },
+      upcomingPrayerName: {
+        fontSize: 15,
+        fontWeight: '500',
+        color: theme.text,
+      },
+      upcomingPrayerTime: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: theme.primary,
+      },
+      modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+      },
+      modalContent: {
+        backgroundColor: theme.card,
+        borderRadius: 16,
+        padding: 24,
+        width: Dimensions.get('window').width * 0.9,
+        maxHeight: '70%',
+      },
+      modalTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: theme.text,
+        marginBottom: 16,
+        textAlign: 'center',
+      },
+      methodOption: {
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        marginBottom: 6,
+        backgroundColor: theme.surface || '#F0F0F0',
+      },
+      methodOptionSelected: {
+        backgroundColor: theme.primary,
+      },
+      methodOptionText: {
+        fontSize: 15,
+        color: theme.text,
+      },
+      methodOptionTextSelected: {
+        color: 'white',
+        fontWeight: '600',
+      },
+      modalCloseButton: {
+        marginTop: 12,
+        paddingVertical: 14,
+        borderRadius: 8,
+        backgroundColor: '#E0E0E0',
+        alignItems: 'center',
+      },
+      modalCloseButtonText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: theme.text,
+      },
     });
   };
 
@@ -477,6 +665,11 @@ const HomeScreen: React.FC = () => {
               📍 {cityName}
             </Text>
           )}
+          <TouchableOpacity style={dynamicStyles.methodButton} onPress={() => setShowMethodPicker(true)}>
+            <Text style={dynamicStyles.methodButtonText}>
+              {CALCULATION_METHODS.find(m => m.id === calculationMethod)?.name || 'Change Method'} ▾
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {specialDay && specialDay.isSpecial && (
@@ -518,15 +711,88 @@ const HomeScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Upcoming Days Toggle */}
+        <TouchableOpacity style={dynamicStyles.upcomingToggle} onPress={toggleUpcoming}>
+          <Text style={dynamicStyles.upcomingToggleText}>
+            {showUpcoming ? 'Hide Upcoming Days ▲' : 'View Upcoming Days ▼'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Upcoming Days Cards */}
+        {showUpcoming && (
+          <>
+            {upcomingLoading ? (
+              <View style={{ padding: 20, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={theme.primary} />
+                <Text style={{ marginTop: 8, color: theme.textSecondary }}>Loading upcoming days...</Text>
+              </View>
+            ) : (
+              upcomingDays.map((day) => (
+                <View key={day.date} style={dynamicStyles.upcomingCard}>
+                  <Text style={dynamicStyles.upcomingCardDate}>
+                    {new Date(day.date).toLocaleDateString('en-US', {
+                      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+                    })}
+                  </Text>
+                  {['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'].map((p) => (
+                    <View key={p} style={dynamicStyles.upcomingRow}>
+                      <Text style={dynamicStyles.upcomingPrayerName}>{p}</Text>
+                      <Text style={dynamicStyles.upcomingPrayerTime}>
+                        {formatTime(day.timings[p as keyof PrayerTimes])}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ))
+            )}
+          </>
+        )}
+
         <View style={dynamicStyles.content}>
           <Text style={dynamicStyles.subtitle}>
             Pull down to refresh prayer times
           </Text>
         </View>
       </ScrollView>
+
+      {/* Calculation Method Picker Modal */}
+      <Modal
+        visible={showMethodPicker}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowMethodPicker(false)}
+      >
+        <View style={dynamicStyles.modalOverlay}>
+          <View style={dynamicStyles.modalContent}>
+            <Text style={dynamicStyles.modalTitle}>Calculation Method</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {CALCULATION_METHODS.map((method) => (
+                <TouchableOpacity
+                  key={method.id}
+                  style={[
+                    dynamicStyles.methodOption,
+                    calculationMethod === method.id && dynamicStyles.methodOptionSelected,
+                  ]}
+                  onPress={() => handleMethodChange(method.id)}
+                >
+                  <Text style={[
+                    dynamicStyles.methodOptionText,
+                    calculationMethod === method.id && dynamicStyles.methodOptionTextSelected,
+                  ]}>
+                    {method.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={dynamicStyles.modalCloseButton} onPress={() => setShowMethodPicker(false)}>
+              <Text style={dynamicStyles.modalCloseButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 
-export default HomeScreen; 
+export default HomeScreen;

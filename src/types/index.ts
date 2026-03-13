@@ -38,11 +38,16 @@ export interface WirdReminder {
   description?: string;
   category: 'quran' | 'dhikr' | 'dua' | 'other';
   type: 'prayer' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'hourly';
-  prayerTime?: keyof PrayerTimes; // Only for prayer-based reminders
+  prayerTime?: keyof PrayerTimes; // Legacy: single prayer (backward compat)
+  prayerTimes?: (keyof PrayerTimes)[]; // Multiple prayers in one reminder
   time?: string; // For daily reminders
   dayOfWeek?: number; // 0-6 for weekly (Sunday = 0)
+  daysOfWeek?: number[]; // Multiple days for daily type (0-6)
   dayOfMonth?: number; // 1-31 for monthly
-  month?: number; // 1-12 for yearly
+  daysOfMonth?: number[]; // Multiple days for monthly type
+  month?: number; // 1-12 for yearly (Gregorian or Hijri when isHijriYearly)
+  isHijriYearly?: boolean; // When true for yearly, month/dayOfMonth are Hijri
+  isHijriMonthly?: boolean; // When true for monthly, daysOfMonth are Hijri
   isActive: boolean;
   createdAt: Date;
   lastTriggered?: Date;
@@ -229,6 +234,5 @@ export type RootTabParamList = {
   Home: undefined;
   Wirds: { reminderId?: string } | undefined;
   Tasbeeh: undefined;
-  History: undefined;
   Settings: undefined;
 }; 

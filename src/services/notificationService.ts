@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import { toGregorian, toHijri } from 'hijri-converter';
 import {
   AppSettings,
   PrayerTimes,
@@ -154,12 +155,48 @@ const computeNextYearlyOccurrence = (month?: number, dayOfMonth?: number, time?:
   return next;
 };
 
+/** Compute next occurrence for yearly Hijri reminder (e.g. Ramadan 15) */
+const computeNextHijriYearlyOccurrence = (hijriMonth: number, hijriDay: number, time?: string): Date | null => {
+  if (!hijriMonth || !hijriDay) return null;
+  const { hours, minutes } = parseTimeToComponents(time);
+  const now = new Date();
+  const { hy: currentHijriYear } = toHijri(now.getFullYear(), now.getMonth() + 1, now.getDate());
+
+  // Try this Hijri year first
+  try {
+    const greg = toGregorian(currentHijriYear, hijriMonth, Math.min(hijriDay, 30));
+    const next = new Date(greg.gy, greg.gm - 1, greg.gd, hours, minutes, 0, 0);
+    if (next > now) return next;
+  } catch {
+    // Invalid date, try next year
+  }
+
+  // Try next Hijri year
+  try {
+    const greg = toGregorian(currentHijriYear + 1, hijriMonth, Math.min(hijriDay, 30));
+    return new Date(greg.gy, greg.gm - 1, greg.gd, hours, minutes, 0, 0);
+  } catch {
+    return null;
+  }
+};
+
 const computeNextHourlyOccurrence = (): Date => {
   const now = new Date();
   const next = new Date(now);
   next.setMinutes(0, 0, 0);
   next.setHours(now.getHours() + (now.getMinutes() === 0 && now.getSeconds() === 0 ? 0 : 1));
   return next;
+};
+
+/** Returns the next N hourly occurrence times (e.g. 24 for a full day ahead) */
+const computeNextHourlyOccurrences = (count: number): Date[] => {
+  const results: Date[] = [];
+  let next = computeNextHourlyOccurrence();
+  for (let i = 0; i < count; i++) {
+    results.push(new Date(next));
+    next.setHours(next.getHours() + 1);
+  }
+  return results;
 };
 
 const buildReminderNotificationData = (reminder: WirdReminder): ReminderNotificationData => ({
@@ -367,11 +404,33 @@ export const notificationService = {
           nextOccurrence = computeNextMonthlyOccurrence(reminder.dayOfMonth, reminder.time);
           break;
         case 'yearly':
-          nextOccurrence = computeNextYearlyOccurrence(reminder.month, reminder.dayOfMonth, reminder.time);
+          nextOccurrence = reminder.isHijriYearly
+            ? computeNextHijriYearlyOccurrence(reminder.month!, reminder.dayOfMonth!, reminder.time)
+            : computeNextYearlyOccurrence(reminder.month, reminder.dayOfMonth, reminder.time);
           break;
-        case 'hourly':
-          nextOccurrence = computeNextHourlyOccurrence();
-          break;
+        case 'hourly': {
+          // Schedule up to 24 hourly notifications ahead so they fire without opening the app
+          const hourlyDates = computeNextHourlyOccurrences(24);
+          await cancelReminderNotifications(reminder.id);
+          const now = new Date();
+          let scheduledCount = 0;
+          for (const occ of hourlyDates) {
+            if (occ <= now) continue;
+            const trigger = buildTrigger(reminder, occ);
+            if (!trigger) continue;
+            try {
+              await Notifications.scheduleNotificationAsync({
+                content: buildNotificationContent(reminder, settings.notificationSound),
+                trigger,
+              });
+              scheduledCount++;
+            } catch (err) {
+              console.warn('Failed to schedule hourly notification', err);
+            }
+          }
+          console.log(`✅ Scheduled ${scheduledCount} hourly notifications for "${reminder.title}"`);
+          return scheduledCount > 0 ? 'hourly_batch' : null;
+        }
         case 'prayer':
           return null;
         default:
@@ -467,7 +526,9 @@ export const notificationService = {
             nextOccurrence = computeNextMonthlyOccurrence(reminder.dayOfMonth, reminder.time);
             break;
           case 'yearly':
-            nextOccurrence = computeNextYearlyOccurrence(reminder.month, reminder.dayOfMonth, reminder.time);
+            nextOccurrence = reminder.isHijriYearly
+              ? computeNextHijriYearlyOccurrence(reminder.month!, reminder.dayOfMonth!, reminder.time)
+              : computeNextYearlyOccurrence(reminder.month, reminder.dayOfMonth, reminder.time);
             break;
           case 'hourly':
             nextOccurrence = computeNextHourlyOccurrence();

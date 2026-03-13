@@ -62,13 +62,23 @@ export default function App() {
           reminderService.markTriggered(data.reminderId);
         }
         
-        // Navigate to Wirds screen with reminder ID
-        if (navigationRef.current) {
-          console.log('Navigating to Wirds screen with reminder ID:', data.reminderId);
-          navigationRef.current.navigate('Wirds', { reminderId: data.reminderId });
-        } else {
-          console.log('Navigation ref not available');
-        }
+        // Store pending reminderId for when Wirds screen loads (handles cold start race)
+        (global as any).__pendingNotificationReminderId = data.reminderId;
+        // Store attachment URLs as fallback if reminder from storage fails to load image
+        (global as any).__pendingNotificationImageUrl = data.reminderImageUrl;
+        (global as any).__pendingNotificationFileUrl = data.reminderFileUrl;
+        (global as any).__pendingNotificationLinkUrl = data.reminderLinkUrl;
+        
+        // Navigate to Wirds screen with reminder ID (retry if nav not ready)
+        const tryNavigate = (attempt = 0) => {
+          if (navigationRef.current) {
+            console.log('Navigating to Wirds screen with reminder ID:', data.reminderId);
+            navigationRef.current.navigate('Wirds', { reminderId: data.reminderId });
+          } else if (attempt < 10) {
+            setTimeout(() => tryNavigate(attempt + 1), 200);
+          }
+        };
+        tryNavigate();
         
         // Log reminder details for debugging
         console.log('Reminder details:', {
