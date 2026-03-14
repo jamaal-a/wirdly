@@ -2,7 +2,7 @@
   "expo": {
     "name": "wirdly",
     "slug": "wirdly",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "description": "Wirdly is a smart Islamic reminder app that prompts you to read the specific awraad or dua you've personally set, automatically timed to your local salah or any other time so you never miss a wird again.",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.jamaal1.wirdly",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "This app needs your location to calculate accurate prayer times for your area.",

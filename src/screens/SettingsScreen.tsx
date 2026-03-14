@@ -9,6 +9,7 @@ import {
   Alert,
   Modal,
   TextInput,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppSettings } from '../types';
@@ -589,6 +590,17 @@ const SettingsScreen: React.FC = () => {
             )}
           </View>
 
+          {/* Support Section */}
+          <View style={dynamicStyles.section}>
+            <Text style={dynamicStyles.sectionTitle}>Support</Text>
+            {renderSettingItem(
+              'Support Wirdly',
+              'Help keep the app free and ad-free',
+              '☕',
+              () => Linking.openURL('https://ko-fi.com/wirdly')
+            )}
+          </View>
+
           {/* Reset Section */}
           <View style={dynamicStyles.section}>
             <Text style={dynamicStyles.sectionTitle}>Reset</Text>
@@ -606,7 +618,7 @@ const SettingsScreen: React.FC = () => {
             <View style={styles.aboutCard}>
               <Text style={styles.aboutTitle}>Wirdly</Text>
               <Text style={styles.aboutSubtitle}>Your Spiritual Companion</Text>
-              <Text style={styles.aboutVersion}>Version 1.4.0</Text>
+              <Text style={styles.aboutVersion}>Version 1.4.1</Text>
               <Text style={styles.aboutDescription}>
                 Wirdly is a smart Islamic reminder app that prompts you to read the specific awraad or dua you've personally set, automatically timed to your local salah or any other time so you never miss a wird again.
               </Text>

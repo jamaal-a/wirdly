@@ -8,28 +8,28 @@
 
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		245C4EB7973B82AA09511C35 /* libPods-wirdly.a in Frameworks */ = {isa = PBXBuildFile; fileRef = CAA07446B139FE6415D488B7 /* libPods-wirdly.a */; };
+		26575947948805889133A922 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAFC559A43E63F4DD0E1E003 /* ExpoModulesProvider.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		6C61C74C717E902B068C32EC /* libPods-wirdly.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CFFD863A6B0B73C98D3E0C0 /* libPods-wirdly.a */; };
-		86C15E9C75B1B52E33A45505 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB4D979682DFCCBB83686E7 /* ExpoModulesProvider.swift */; };
-		A88BB65A4EC34BE3A9A10657 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 6FB53D7D706A46EAAA024219 /* PrivacyInfo.xcprivacy */; };
+		796BAE180A5540BD883C126A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B24339CEAE0B4FB6B5D51B96 /* PrivacyInfo.xcprivacy */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0CFFD863A6B0B73C98D3E0C0 /* libPods-wirdly.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-wirdly.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07F961A680F5B00A75B9A /* wirdly.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = wirdly.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = wirdly/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = wirdly/Info.plist; sourceTree = "<group>"; };
-		3CB4D979682DFCCBB83686E7 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-wirdly/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		6FB53D7D706A46EAAA024219 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = wirdly/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		17B0BC9FEDB408B8DA09A778 /* Pods-wirdly.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-wirdly.release.xcconfig"; path = "Target Support Files/Pods-wirdly/Pods-wirdly.release.xcconfig"; sourceTree = "<group>"; };
+		A77C8A85B59D8BF7F5EE0888 /* Pods-wirdly.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-wirdly.debug.xcconfig"; path = "Target Support Files/Pods-wirdly/Pods-wirdly.debug.xcconfig"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = wirdly/SplashScreen.storyboard; sourceTree = "<group>"; };
+		B24339CEAE0B4FB6B5D51B96 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = PrivacyInfo.xcprivacy; path = wirdly/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		D0FAC869925EEB4CD81848A5 /* Pods-wirdly.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-wirdly.debug.xcconfig"; path = "Target Support Files/Pods-wirdly/Pods-wirdly.debug.xcconfig"; sourceTree = "<group>"; };
+		CAA07446B139FE6415D488B7 /* libPods-wirdly.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-wirdly.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		DAFC559A43E63F4DD0E1E003 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-wirdly/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = wirdly/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* wirdly-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "wirdly-Bridging-Header.h"; path = "wirdly/wirdly-Bridging-Header.h"; sourceTree = "<group>"; };
-		FCB35AF05D5CC769C5A8D1A8 /* Pods-wirdly.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-wirdly.release.xcconfig"; path = "Target Support Files/Pods-wirdly/Pods-wirdly.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,13 +37,23 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6C61C74C717E902B068C32EC /* libPods-wirdly.a in Frameworks */,
+				245C4EB7973B82AA09511C35 /* libPods-wirdly.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		085051900B9947C51C3EE5D2 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				A77C8A85B59D8BF7F5EE0888 /* Pods-wirdly.debug.xcconfig */,
+				17B0BC9FEDB408B8DA09A778 /* Pods-wirdly.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		13B07FAE1A68108700A75B9A /* wirdly */ = {
 			isa = PBXGroup;
 			children = (
@@ -53,7 +63,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				6FB53D7D706A46EAAA024219 /* PrivacyInfo.xcprivacy */,
+				B24339CEAE0B4FB6B5D51B96 /* PrivacyInfo.xcprivacy */,
 			);
 			name = wirdly;
 			sourceTree = "<group>";
@@ -62,17 +72,17 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				0CFFD863A6B0B73C98D3E0C0 /* libPods-wirdly.a */,
+				CAA07446B139FE6415D488B7 /* libPods-wirdly.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		675C50388A4220368C1F918B /* wirdly */ = {
+		36AD938E3E8F29D14643D12C /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				3CB4D979682DFCCBB83686E7 /* ExpoModulesProvider.swift */,
+				CF5D17E030669CFB420CD9D8 /* wirdly */,
 			);
-			name = wirdly;
+			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -89,8 +99,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				FB408481E21BF0AB307D8608 /* Pods */,
-				8B60C1576D2A8D660D8F88C9 /* ExpoModulesProviders */,
+				085051900B9947C51C3EE5D2 /* Pods */,
+				36AD938E3E8F29D14643D12C /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -105,14 +115,6 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		8B60C1576D2A8D660D8F88C9 /* ExpoModulesProviders */ = {
-			isa = PBXGroup;
-			children = (
-				675C50388A4220368C1F918B /* wirdly */,
-			);
-			name = ExpoModulesProviders;
-			sourceTree = "<group>";
-		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
 			isa = PBXGroup;
 			children = (
@@ -122,14 +124,12 @@
 			path = wirdly/Supporting;
 			sourceTree = "<group>";
 		};
-		FB408481E21BF0AB307D8608 /* Pods */ = {
+		CF5D17E030669CFB420CD9D8 /* wirdly */ = {
 			isa = PBXGroup;
 			children = (
-				D0FAC869925EEB4CD81848A5 /* Pods-wirdly.debug.xcconfig */,
-				FCB35AF05D5CC769C5A8D1A8 /* Pods-wirdly.release.xcconfig */,
+				DAFC559A43E63F4DD0E1E003 /* ExpoModulesProvider.swift */,
 			);
-			name = Pods;
-			path = Pods;
+			name = wirdly;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -140,13 +140,13 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "wirdly" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				5E56850A9478BA629E08DCC8 /* [Expo] Configure project */,
+				1C51AD26E453D047FB0D6AE0 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				2D0EADB18E1BBC7BE18F4BB9 /* [CP] Embed Pods Frameworks */,
+				2EEF97E9DDE0C2871620C0EE /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -196,7 +196,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				A88BB65A4EC34BE3A9A10657 /* PrivacyInfo.xcprivacy in Resources */,
+				796BAE180A5540BD883C126A /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,29 +242,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		2D0EADB18E1BBC7BE18F4BB9 /* [CP] Embed Pods Frameworks */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-wirdly/Pods-wirdly-frameworks.sh",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/React-Core-prebuilt/React.framework/React",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/ReactNativeDependencies/ReactNativeDependencies.framework/ReactNativeDependencies",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermes.framework/hermes",
-			);
-			name = "[CP] Embed Pods Frameworks";
-			outputPaths = (
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ReactNativeDependencies.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermes.framework",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-wirdly/Pods-wirdly-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		5E56850A9478BA629E08DCC8 /* [Expo] Configure project */ = {
+		1C51AD26E453D047FB0D6AE0 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -287,6 +265,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-wirdly/expo-configure-project.sh\"\n";
+		};
+		2EEF97E9DDE0C2871620C0EE /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-wirdly/Pods-wirdly-frameworks.sh",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/React-Core-prebuilt/React.framework/React",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/ReactNativeDependencies/ReactNativeDependencies.framework/ReactNativeDependencies",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermes.framework/hermes",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputPaths = (
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/React.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ReactNativeDependencies.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermes.framework",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-wirdly/Pods-wirdly-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
 		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -336,7 +336,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				86C15E9C75B1B52E33A45505 /* ExpoModulesProvider.swift in Sources */,
+				26575947948805889133A922 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,7 +345,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = D0FAC869925EEB4CD81848A5 /* Pods-wirdly.debug.xcconfig */;
+			baseConfigurationReference = A77C8A85B59D8BF7F5EE0888 /* Pods-wirdly.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -381,7 +381,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = FCB35AF05D5CC769C5A8D1A8 /* Pods-wirdly.release.xcconfig */;
+			baseConfigurationReference = 17B0BC9FEDB408B8DA09A778 /* Pods-wirdly.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
