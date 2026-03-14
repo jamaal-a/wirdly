@@ -20,7 +20,7 @@ import { useRoute, useNavigation, useFocusEffect, RouteProp } from '@react-navig
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { WirdReminder, RootTabParamList, PrayerTimes } from '../types';

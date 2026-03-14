@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Image, ImageStyle } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Resolves file:// URIs to base64 for reliable display on iOS (RN Image has issues with local files)
 interface LocalImageProps {

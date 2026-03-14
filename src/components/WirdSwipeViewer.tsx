@@ -12,7 +12,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { WirdReminder } from '../types';
 
 // Resolves file:// URIs to base64 for reliable display on iOS
