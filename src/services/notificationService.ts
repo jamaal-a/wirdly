@@ -2,12 +2,40 @@ import * as Notifications from 'expo-notifications';
 import { toGregorian, toHijri } from 'hijri-converter';
 import {
   AppSettings,
+  Location,
   PrayerTimes,
   ReminderNotificationData,
   TimeComponents,
   WirdReminder,
 } from '../types';
+import { fetchPrayerTimesByDate } from './prayerTimesService';
+import { getCurrentLocation, getLastKnownLocation } from './locationService';
 import { settingsService } from './settingsService';
+import { parseAladhanTimeString } from '../utils/aladhanTime';
+
+/** Salah keys we schedule for prayer-type wird reminders (matches app UI). */
+const PRAYER_WIRD_KEYS: (keyof PrayerTimes)[] = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+
+/** Max notifications per reminder batch (stay under iOS ~64 global limit). */
+const MAX_DAILY_BATCH = 14;
+const MAX_WEEKLY_BATCH = 8;
+const MAX_MONTHLY_BATCH = 6;
+const MAX_YEARLY_BATCH = 3;
+const MAX_NOTIFICATIONS_PER_REMINDER = 32;
+
+/** iOS often rejects date triggers in the immediate future; keep a small buffer. */
+const MIN_NOTIFICATION_LEAD_MS = 5_000;
+
+const getPrayerKeysForReminder = (reminder: WirdReminder): (keyof PrayerTimes)[] => {
+  const raw: (keyof PrayerTimes)[] =
+    reminder.prayerTimes && reminder.prayerTimes.length > 0
+      ? reminder.prayerTimes
+      : reminder.prayerTime
+        ? [reminder.prayerTime]
+        : [];
+  const allowed = new Set(PRAYER_WIRD_KEYS as unknown as string[]);
+  return raw.filter((k): k is keyof PrayerTimes => allowed.has(k as string));
+};
 
 const DEFAULT_TIME: TimeComponents = { hours: 9, minutes: 0 };
 
@@ -199,6 +227,150 @@ const computeNextHourlyOccurrences = (count: number): Date[] => {
   return results;
 };
 
+const computeDailyBatchOccurrences = (reminder: WirdReminder): Date[] => {
+  const now = new Date();
+  const { hours, minutes } = parseTimeToComponents(reminder.time);
+  const results: Date[] = [];
+
+  if (reminder.daysOfWeek && reminder.daysOfWeek.length > 0) {
+    const allowed = new Set(reminder.daysOfWeek);
+    for (let offset = 0; offset < 120 && results.length < MAX_DAILY_BATCH; offset++) {
+      const candidate = new Date(now);
+      candidate.setDate(now.getDate() + offset);
+      if (!allowed.has(candidate.getDay())) continue;
+      candidate.setHours(hours, minutes, 0, 0);
+      if (candidate > now) {
+        results.push(candidate);
+      }
+    }
+    return results;
+  }
+
+  const first = computeNextDailyOccurrence(reminder.time);
+  for (let i = 0; i < MAX_DAILY_BATCH; i++) {
+    const d = new Date(first);
+    d.setDate(first.getDate() + i);
+    d.setHours(hours, minutes, 0, 0);
+    if (d > now) {
+      results.push(d);
+    }
+  }
+  return results;
+};
+
+const computeWeeklyBatchOccurrences = (reminder: WirdReminder): Date[] => {
+  const first = computeNextWeeklyOccurrence(reminder.dayOfWeek, reminder.time);
+  if (!first) return [];
+  const now = new Date();
+  const { hours, minutes } = parseTimeToComponents(reminder.time);
+  const results: Date[] = [];
+  for (let i = 0; i < MAX_WEEKLY_BATCH; i++) {
+    const d = new Date(first);
+    d.setDate(first.getDate() + i * 7);
+    d.setHours(hours, minutes, 0, 0);
+    if (d > now) {
+      results.push(d);
+    }
+  }
+  return results;
+};
+
+const computeMonthlyBatchOccurrences = (reminder: WirdReminder): Date[] => {
+  const now = new Date();
+  const { hours, minutes } = parseTimeToComponents(reminder.time);
+  const results: Date[] = [];
+
+  if (reminder.daysOfMonth && reminder.daysOfMonth.length > 0) {
+    if (reminder.isHijriMonthly) {
+      for (let offset = 0; offset < 400 && results.length < MAX_MONTHLY_BATCH; offset++) {
+        const candidate = new Date(now);
+        candidate.setDate(now.getDate() + offset);
+        candidate.setHours(hours, minutes, 0, 0);
+        if (candidate <= now) continue;
+        try {
+          const { hd } = toHijri(candidate.getFullYear(), candidate.getMonth() + 1, candidate.getDate());
+          if (reminder.daysOfMonth.includes(hd)) {
+            results.push(candidate);
+          }
+        } catch {
+          /* skip invalid */
+        }
+      }
+      return results;
+    }
+    for (let offset = 0; offset < 120 && results.length < MAX_MONTHLY_BATCH; offset++) {
+      const candidate = new Date(now);
+      candidate.setDate(now.getDate() + offset);
+      candidate.setHours(hours, minutes, 0, 0);
+      if (candidate <= now) continue;
+      if (reminder.daysOfMonth.includes(candidate.getDate())) {
+        results.push(candidate);
+      }
+    }
+    return results;
+  }
+
+  if (!reminder.dayOfMonth) return [];
+  let next: Date | null = computeNextMonthlyOccurrence(reminder.dayOfMonth, reminder.time);
+  for (let i = 0; i < MAX_MONTHLY_BATCH && next; i++) {
+    if (next > now) {
+      results.push(new Date(next));
+    }
+    const n = new Date(next);
+    n.setMonth(n.getMonth() + 1);
+    const dim = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate();
+    n.setDate(Math.min(reminder.dayOfMonth, dim));
+    n.setHours(hours, minutes, 0, 0);
+    next = n;
+  }
+  return results;
+};
+
+const computeYearlyBatchOccurrences = (reminder: WirdReminder): Date[] => {
+  const now = new Date();
+  const results: Date[] = [];
+
+  if (reminder.isHijriYearly) {
+    let next: Date | null = computeNextHijriYearlyOccurrence(
+      reminder.month!,
+      reminder.dayOfMonth!,
+      reminder.time,
+    );
+    for (let i = 0; i < MAX_YEARLY_BATCH && next; i++) {
+      if (next > now) {
+        results.push(new Date(next));
+      }
+      const { hy } = toHijri(next.getFullYear(), next.getMonth() + 1, next.getDate());
+      try {
+        const g = toGregorian(hy + 1, reminder.month!, Math.min(reminder.dayOfMonth!, 30));
+        next = new Date(
+          g.gy,
+          g.gm - 1,
+          g.gd,
+          parseTimeToComponents(reminder.time).hours,
+          parseTimeToComponents(reminder.time).minutes,
+          0,
+          0,
+        );
+      } catch {
+        break;
+      }
+    }
+    return results;
+  }
+
+  let next: Date | null = computeNextYearlyOccurrence(reminder.month, reminder.dayOfMonth, reminder.time);
+  for (let i = 0; i < MAX_YEARLY_BATCH && next; i++) {
+    if (next > now) {
+      results.push(new Date(next));
+    }
+    const n = new Date(next);
+    n.setFullYear(n.getFullYear() + 1);
+    next = n;
+  }
+  return results;
+};
+
 const buildReminderNotificationData = (reminder: WirdReminder): ReminderNotificationData => ({
   type: 'wird_reminder',
   reminderId: reminder.id,
@@ -219,6 +391,98 @@ const buildNotificationContent = (
   sound: enableSound ? 'default' : false,
   data: buildReminderNotificationData(reminder) as unknown as Record<string, unknown>,
 });
+
+const schedulePrayerWirdNotifications = async (
+  reminder: WirdReminder,
+  enableSound: boolean | undefined,
+): Promise<string | null> => {
+  const keys = getPrayerKeysForReminder(reminder);
+  if (keys.length === 0) {
+    console.warn(`No prayer times selected for reminder "${reminder.title}"`);
+    return null;
+  }
+
+  let location: Location | null = await getLastKnownLocation();
+  if (!location) {
+    try {
+      location = await getCurrentLocation();
+    } catch {
+      console.warn('No location available for prayer reminder scheduling');
+      return null;
+    }
+  }
+
+  const now = new Date();
+  const minTime = Date.now() + MIN_NOTIFICATION_LEAD_MS;
+  const triggers: Date[] = [];
+  const maxDays = 14;
+  const maxOccurrences = 12;
+
+  for (let dayOffset = 0; dayOffset < maxDays && triggers.length < maxOccurrences * 3; dayOffset++) {
+    const dayDate = new Date(now);
+    dayDate.setDate(now.getDate() + dayOffset);
+    dayDate.setHours(12, 0, 0, 0);
+
+    try {
+      if (dayOffset > 0) {
+        await new Promise<void>(resolve => setTimeout(resolve, 350));
+      }
+      const response = await fetchPrayerTimesByDate(dayDate, location);
+      const timings = response.data.timings;
+
+      for (const key of keys) {
+        const timeStr = timings[key];
+        if (!timeStr) continue;
+        const parsed = parseAladhanTimeString(timeStr);
+        if (!parsed) continue;
+        const trigger = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate() + dayOffset,
+          parsed.hours,
+          parsed.minutes,
+          0,
+          0,
+        );
+        if (trigger.getTime() > minTime) {
+          triggers.push(trigger);
+        }
+      }
+    } catch (e) {
+      console.warn(`Prayer times fetch failed for scheduling (day ${dayOffset}):`, e);
+    }
+  }
+
+  triggers.sort((a, b) => a.getTime() - b.getTime());
+  const seen = new Set<number>();
+  const uniqueSorted: Date[] = [];
+  for (const t of triggers) {
+    const k = t.getTime();
+    if (!seen.has(k)) {
+      seen.add(k);
+      uniqueSorted.push(t);
+    }
+  }
+  const toSchedule = uniqueSorted
+    .filter(d => d.getTime() > minTime)
+    .slice(0, maxOccurrences);
+
+  let scheduledCount = 0;
+  for (const date of toSchedule) {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: buildNotificationContent(reminder, enableSound),
+        trigger: { type: 'date', date } as Notifications.NotificationTriggerInput,
+      });
+      scheduledCount++;
+    } catch (err) {
+      console.warn('Failed to schedule prayer wird notification', err);
+    }
+  }
+
+  console.log(`✅ Scheduled ${scheduledCount} prayer notifications for "${reminder.title}"`);
+  return scheduledCount > 0 ? 'prayer_batch' : null;
+};
 
 const buildTrigger = (
   reminder: WirdReminder,
@@ -290,6 +554,33 @@ const cancelReminderNotifications = async (reminderId: string): Promise<number> 
   }
 };
 
+const scheduleBatchAtDates = async (
+  reminder: WirdReminder,
+  dates: Date[],
+  enableSound: boolean | undefined,
+): Promise<string | null> => {
+  await cancelReminderNotifications(reminder.id);
+  const minTime = Date.now() + MIN_NOTIFICATION_LEAD_MS;
+  const sorted = [...dates]
+    .filter(d => d.getTime() > minTime)
+    .sort((a, b) => a.getTime() - b.getTime());
+  const capped = sorted.slice(0, MAX_NOTIFICATIONS_PER_REMINDER);
+  let scheduledCount = 0;
+  for (const date of capped) {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: buildNotificationContent(reminder, enableSound),
+        trigger: { type: 'date', date } as Notifications.NotificationTriggerInput,
+      });
+      scheduledCount++;
+    } catch (err) {
+      console.warn('Failed to schedule batch notification', err);
+    }
+  }
+  console.log(`✅ Scheduled ${scheduledCount} batch notifications for "${reminder.title}" (${reminder.type})`);
+  return scheduledCount > 0 ? 'batch' : null;
+};
+
 const cancelAllReminderNotifications = async (): Promise<number> => {
   try {
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
@@ -346,11 +637,13 @@ export const notificationService = {
         const prayerTime = prayerTimes[prayerName];
         if (!prayerTime) continue;
 
-        const [hours, minutes] = prayerTime.split(':').map(Number);
+        const parsed = parseAladhanTimeString(prayerTime);
+        if (!parsed) continue;
         const triggerDate = new Date(date);
-        triggerDate.setHours(hours, minutes, 0, 0);
+        triggerDate.setHours(parsed.hours, parsed.minutes, 0, 0);
 
-        if (triggerDate <= new Date()) {
+        const minTime = Date.now() + MIN_NOTIFICATION_LEAD_MS;
+        if (triggerDate.getTime() <= minTime) {
           continue;
         }
 
@@ -391,31 +684,31 @@ export const notificationService = {
         return null;
       }
 
-      let nextOccurrence: Date | null = null;
-
       switch (reminder.type) {
-        case 'daily':
-          nextOccurrence = computeNextDailyOccurrence(reminder.time);
-          break;
-        case 'weekly':
-          nextOccurrence = computeNextWeeklyOccurrence(reminder.dayOfWeek, reminder.time);
-          break;
-        case 'monthly':
-          nextOccurrence = computeNextMonthlyOccurrence(reminder.dayOfMonth, reminder.time);
-          break;
-        case 'yearly':
-          nextOccurrence = reminder.isHijriYearly
-            ? computeNextHijriYearlyOccurrence(reminder.month!, reminder.dayOfMonth!, reminder.time)
-            : computeNextYearlyOccurrence(reminder.month, reminder.dayOfMonth, reminder.time);
-          break;
+        case 'daily': {
+          const dates = computeDailyBatchOccurrences(reminder);
+          return scheduleBatchAtDates(reminder, dates, settings.notificationSound);
+        }
+        case 'weekly': {
+          const dates = computeWeeklyBatchOccurrences(reminder);
+          return scheduleBatchAtDates(reminder, dates, settings.notificationSound);
+        }
+        case 'monthly': {
+          const dates = computeMonthlyBatchOccurrences(reminder);
+          return scheduleBatchAtDates(reminder, dates, settings.notificationSound);
+        }
+        case 'yearly': {
+          const dates = computeYearlyBatchOccurrences(reminder);
+          return scheduleBatchAtDates(reminder, dates, settings.notificationSound);
+        }
         case 'hourly': {
           // Schedule up to 24 hourly notifications ahead so they fire without opening the app
           const hourlyDates = computeNextHourlyOccurrences(24);
           await cancelReminderNotifications(reminder.id);
-          const now = new Date();
+          const minTime = Date.now() + MIN_NOTIFICATION_LEAD_MS;
           let scheduledCount = 0;
           for (const occ of hourlyDates) {
-            if (occ <= now) continue;
+            if (occ.getTime() <= minTime) continue;
             const trigger = buildTrigger(reminder, occ);
             if (!trigger) continue;
             try {
@@ -431,45 +724,14 @@ export const notificationService = {
           console.log(`✅ Scheduled ${scheduledCount} hourly notifications for "${reminder.title}"`);
           return scheduledCount > 0 ? 'hourly_batch' : null;
         }
-        case 'prayer':
-          return null;
+        case 'prayer': {
+          await cancelReminderNotifications(reminder.id);
+          return schedulePrayerWirdNotifications(reminder, settings.notificationSound);
+        }
         default:
-          nextOccurrence = null;
+          console.warn(`Unknown reminder type for scheduling: ${reminder.type}`);
+          return null;
       }
-
-      if (!nextOccurrence) {
-        console.warn(`Could not determine next occurrence for reminder "${reminder.title}"`);
-        return null;
-      }
-
-      const trigger = buildTrigger(reminder, nextOccurrence);
-      if (!trigger) {
-        console.warn(`Unable to build trigger for reminder "${reminder.title}"`);
-        return null;
-      }
-
-      await cancelReminderNotifications(reminder.id);
-
-      console.log('==========================================');
-      console.log(`Scheduling reminder "${reminder.title}"`);
-      console.log(`Type: ${reminder.type}`);
-      console.log(`Next occurrence: ${nextOccurrence.toLocaleString()}`);
-      console.log('Trigger:', trigger);
-      console.log('==========================================');
-
-      let notificationId: string | null = null;
-      try {
-        notificationId = await Notifications.scheduleNotificationAsync({
-          content: buildNotificationContent(reminder, settings.notificationSound),
-          trigger,
-        });
-        console.log(`✅ Scheduled reminder "${reminder.title}" with ID ${notificationId}`);
-      } catch (error) {
-        console.error('❌ Error scheduling reminder notification', error);
-        return null;
-      }
-
-      return notificationId;
     } catch (error) {
       console.error('Error scheduling wird reminder', error);
       return null;
@@ -486,62 +748,17 @@ export const notificationService = {
         return;
       }
 
-      // Get currently scheduled notifications
-      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-      const scheduledReminderIds = new Set(
-        scheduled
-          .filter(n => isReminderNotification(n.content?.data))
-          .map(n => n.content.data.reminderId)
-      );
-
-      // Only cancel and reschedule if there are missing or changed reminders
-      const activeReminderIds = new Set(reminders.map(r => r.id));
-      const needsReschedule = 
-        reminders.length !== scheduledReminderIds.size ||
-        reminders.some(r => !scheduledReminderIds.has(r.id));
-
-      if (!needsReschedule) {
-        console.log('✅ All reminders are already scheduled correctly. Skipping reschedule.');
-        return;
-      }
-
+      // Always run a full reschedule. A previous optimization skipped when every active
+      // reminder id appeared in *some* scheduled notification — but batched types (prayer,
+      // hourly, daily, etc.) must be refreshed as times fire or location changes, and that
+      // check caused prayer wird reminders to never reschedule after a failed first attempt.
       console.log(`🔄 Rescheduling ${reminders.length} reminders...`);
       await cancelAllReminderNotifications();
 
-      const now = new Date();
       let scheduledCount = 0;
       let skippedCount = 0;
 
       for (const reminder of reminders) {
-        // Compute next occurrence
-        let nextOccurrence: Date | null = null;
-        switch (reminder.type) {
-          case 'daily':
-            nextOccurrence = computeNextDailyOccurrence(reminder.time);
-            break;
-          case 'weekly':
-            nextOccurrence = computeNextWeeklyOccurrence(reminder.dayOfWeek, reminder.time);
-            break;
-          case 'monthly':
-            nextOccurrence = computeNextMonthlyOccurrence(reminder.dayOfMonth, reminder.time);
-            break;
-          case 'yearly':
-            nextOccurrence = reminder.isHijriYearly
-              ? computeNextHijriYearlyOccurrence(reminder.month!, reminder.dayOfMonth!, reminder.time)
-              : computeNextYearlyOccurrence(reminder.month, reminder.dayOfMonth, reminder.time);
-            break;
-          case 'hourly':
-            nextOccurrence = computeNextHourlyOccurrence();
-            break;
-        }
-
-        // Skip if next occurrence is in the past or null
-        if (!nextOccurrence || nextOccurrence <= now) {
-          console.warn(`⚠️ Skipping reminder "${reminder.title}" - next occurrence is in the past or invalid`);
-          skippedCount++;
-          continue;
-        }
-
         const result = await notificationService.scheduleWirdReminder(reminder);
         if (result) {
           scheduledCount++;

@@ -1,4 +1,5 @@
 import { toGregorian, toHijri } from 'hijri-converter';
+import { parseAladhanTimeString } from '../utils/aladhanTime';
 import { WirdReminder, PrayerTimes, TimeComponents } from '../types';
 import { notificationService } from './notificationService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -433,11 +434,12 @@ function calculateNextHijriYearlyTrigger(hijriMonth: number, hijriDay: number, t
 function isPrayerTimeDue(prayerTime: keyof PrayerTimes, prayerTimes: PrayerTimes, currentTime: Date): boolean {
   const prayerTimeStr = prayerTimes[prayerTime];
   if (!prayerTimeStr) return false;
-  
-  const [hours, minutes] = prayerTimeStr.split(':').map(Number);
+
+  const parsed = parseAladhanTimeString(prayerTimeStr);
+  if (!parsed) return false;
   const prayerDate = new Date();
-  prayerDate.setHours(hours, minutes, 0, 0);
-  
+  prayerDate.setHours(parsed.hours, parsed.minutes, 0, 0);
+
   const timeDiff = Math.abs(currentTime.getTime() - prayerDate.getTime());
   return timeDiff <= 5 * 60 * 1000; // Within 5 minutes
 }

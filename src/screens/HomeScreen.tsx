@@ -20,6 +20,7 @@ import * as ExpoLocation from 'expo-location';
 import { formatTime, getCurrentDate, isCurrentPrayer } from '../utils/formatTime';
 import { formatIslamicDate, isSpecialIslamicDay } from '../utils/islamicDate';
 import { notificationService } from '../services/notificationService';
+import { reminderService } from '../services/reminderService';
 import { offlineService } from '../services/offlineService';
 import { themeService } from '../services/themeService';
 import { settingsService } from '../services/settingsService';
@@ -131,11 +132,18 @@ const HomeScreen: React.FC = () => {
         
         // Calculate next prayer
         calculateNextPrayer(response.data.timings);
-        
-        // Note: Prayer notifications disabled due to Expo limitations
-        // Scheduled notifications don't work properly even in development builds
-        // TODO: Re-enable when using standalone build or different notification approach
-        // await notificationService.schedulePrayerNotifications(response.data.timings, new Date());
+
+        const settings = settingsService.getAllSettings();
+        if (settings.prayerNotifications) {
+          notificationService
+            .schedulePrayerNotifications(response.data.timings, new Date())
+            .catch(err => console.warn('schedulePrayerNotifications', err));
+        }
+
+        // Reschedule all wird reminders now that location and times are available
+        notificationService
+          .rescheduleAllReminders(() => reminderService.getAllReminders())
+          .catch(() => {});
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load prayer times';

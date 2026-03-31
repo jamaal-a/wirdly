@@ -41,11 +41,7 @@ export default function App() {
       console.log('🔔 Notification received:', notification.request.content.title);
       console.log('Notification trigger:', JSON.stringify(notification.request.trigger));
       console.log('Notification data:', notification.request.content.data);
-
-      const data = notification.request.content.data;
-      if (data && data.type === 'wird_reminder' && typeof data.reminderId === 'string') {
-        reminderService.markTriggered(data.reminderId);
-      }
+      // Do not markTriggered here — same notification also triggers response listener on tap and would double-count.
     });
 
     // Set up notification response handler (fires when notification is tapped)
