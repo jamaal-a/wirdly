@@ -618,7 +618,7 @@ const SettingsScreen: React.FC = () => {
             <View style={styles.aboutCard}>
               <Text style={styles.aboutTitle}>Wirdly</Text>
               <Text style={styles.aboutSubtitle}>Your Spiritual Companion</Text>
-              <Text style={styles.aboutVersion}>Version 1.4.2</Text>
+              <Text style={styles.aboutVersion}>Version 1.4.5</Text>
               <Text style={styles.aboutDescription}>
                 Wirdly is a smart Islamic reminder app that prompts you to read the specific awraad or dua you've personally set, automatically timed to your local salah or any other time so you never miss a wird again.
               </Text>
