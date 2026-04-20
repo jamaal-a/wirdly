@@ -135,9 +135,24 @@ const HomeScreen: React.FC = () => {
 
         const settings = settingsService.getAllSettings();
         if (settings.prayerNotifications) {
-          notificationService
-            .schedulePrayerNotifications(response.data.timings, new Date())
-            .catch(err => console.warn('schedulePrayerNotifications', err));
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          (async () => {
+            try {
+              await new Promise<void>(r => setTimeout(r, 400));
+              const tomorrowResp = await fetchPrayerTimesByDate(
+                tomorrow,
+                currentLocation,
+                settings.calculationMethod,
+              );
+              await notificationService.schedulePrayerNotifications([
+                { anchorDate: new Date(), timings: response.data.timings },
+                { anchorDate: tomorrow, timings: tomorrowResp.data.timings },
+              ]);
+            } catch (err) {
+              console.warn('schedulePrayerNotifications', err);
+            }
+          })();
         }
 
         // Reschedule all wird reminders now that location and times are available

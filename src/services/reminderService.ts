@@ -25,6 +25,12 @@ const deserializeReminders = (data: string): WirdReminder[] => {
     const parsed = JSON.parse(data);
     return parsed.map((reminder: any) => ({
       ...reminder,
+      category: (() => {
+        const raw = String(reminder.category ?? '').toLowerCase();
+        return raw === 'quran' || raw === 'dhikr' || raw === 'dua' || raw === 'other'
+          ? (raw as WirdReminder['category'])
+          : 'other';
+      })(),
       createdAt: reminder.createdAt ? new Date(reminder.createdAt) : new Date(),
       lastTriggered: reminder.lastTriggered ? new Date(reminder.lastTriggered) : undefined,
       nextTrigger: reminder.nextTrigger ? new Date(reminder.nextTrigger) : undefined,
@@ -157,14 +163,23 @@ export const reminderService = {
     if (index === -1) return null;
     
     const updatedReminder = { ...reminders[index], ...updates };
-    const shouldRecalculateTrigger = Boolean(
-      updates.type !== undefined ||
-      updates.dayOfWeek !== undefined ||
-      updates.dayOfMonth !== undefined ||
-      updates.month !== undefined ||
-      updates.time !== undefined ||
-      updates.isHijriYearly !== undefined
-    );
+
+    /** Fields that change when notifications fire; must reschedule if present in `updates`. */
+    const scheduleAffectingKeys: (keyof WirdReminder)[] = [
+      'type',
+      'category',
+      'dayOfWeek',
+      'daysOfWeek',
+      'dayOfMonth',
+      'daysOfMonth',
+      'month',
+      'time',
+      'isHijriYearly',
+      'isHijriMonthly',
+      'prayerTime',
+      'prayerTimes',
+    ];
+    const shouldRecalculateTrigger = scheduleAffectingKeys.some(key => key in updates);
 
     if (shouldRecalculateTrigger) {
       updatedReminder.nextTrigger = calculateNextTrigger(updatedReminder);
@@ -277,7 +292,7 @@ export const reminderService = {
             ? isHijriYearlyReminderDue(reminder.month!, reminder.dayOfMonth!, currentTime)
             : isYearlyReminderDue(reminder.month!, reminder.dayOfMonth!, currentTime);
         case 'hourly':
-          return isHourlyReminderDue(currentTime);
+          return isHourlyReminderDue(reminder, currentTime);
         default:
           return false;
       }
@@ -307,7 +322,7 @@ function calculateNextTrigger(reminder: WirdReminder): Date | undefined {
         ? calculateNextHijriYearlyTrigger(reminder.month, reminder.dayOfMonth, reminder.time, now)
         : calculateNextYearlyTrigger(reminder.month, reminder.dayOfMonth, reminder.time, now);
     case 'hourly':
-      return calculateNextHourlyTrigger(now);
+      return calculateNextHourlyTrigger(reminder, now);
     default:
       return undefined;
   }
@@ -478,14 +493,23 @@ function isHijriYearlyReminderDue(hijriMonth: number, hijriDay: number, currentT
   }
 }
 
-function calculateNextHourlyTrigger(from: Date): Date {
-  const next = new Date(from);
-  next.setHours(next.getHours() + 1);
-  next.setMinutes(0, 0, 0); // Set to top of the hour
-  return next;
+/** Next clock hour (:00) at or after `from` (hourly reminders always fire on the hour). */
+function calculateNextHourlyTrigger(_reminder: WirdReminder, from: Date): Date {
+  const slot = new Date(
+    from.getFullYear(),
+    from.getMonth(),
+    from.getDate(),
+    from.getHours(),
+    0,
+    0,
+    0,
+  );
+  if (slot.getTime() <= from.getTime()) {
+    slot.setHours(slot.getHours() + 1);
+  }
+  return slot;
 }
 
-function isHourlyReminderDue(currentTime: Date): boolean {
-  // Check if it's the top of the hour (minutes = 0)
+function isHourlyReminderDue(_reminder: WirdReminder, currentTime: Date): boolean {
   return currentTime.getMinutes() === 0;
 } 

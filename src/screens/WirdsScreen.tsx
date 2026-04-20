@@ -584,10 +584,15 @@ const WirdsScreen: React.FC = () => {
       return;
     }
 
-    // Ensure time input is applied before saving (for daily/weekly/monthly/yearly types)
+    // Ensure time input is applied before saving (hourly is always top of hour — no time field)
     let reminderToSave = { ...newReminder };
     if (['daily', 'weekly', 'monthly', 'yearly'].includes(newReminder.type)) {
       reminderToSave = { ...reminderToSave, time: normalizeTimeString(newReminder.time) };
+    }
+    if (newReminder.type === 'hourly') {
+      const { time: _omitTime, ...hourlyPayload } = reminderToSave;
+      // Clear stored time so edits do not keep a previous type's time on the reminder object
+      reminderToSave = { ...hourlyPayload, time: undefined as unknown as string };
     }
     // For yearly reminders, set isHijriYearly based on date picker selection
     if (newReminder.type === 'yearly') {
@@ -854,7 +859,7 @@ const WirdsScreen: React.FC = () => {
         return `Yearly on ${months[(reminder.month || 1) - 1]} ${reminder.dayOfMonth}`;
       }
       case 'hourly':
-        return 'Every hour';
+        return 'Every hour on the hour';
       default:
         return '';
     }
@@ -1525,6 +1530,12 @@ const WirdsScreen: React.FC = () => {
                 ))}
               </ScrollView>
             </View>
+
+            {newReminder.type === 'hourly' && (
+              <View style={dynamicStyles.fieldGroup}>
+                <Text style={dynamicStyles.label}>Fires every hour on the hour (e.g. 1:00, 2:00, …).</Text>
+              </View>
+            )}
 
             {/* Conditional fields based on type */}
             {newReminder.type === 'prayer' && (

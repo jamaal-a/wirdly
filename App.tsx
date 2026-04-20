@@ -25,6 +25,7 @@ export default function App() {
     };
     
     initializeData().then(async () => {
+      await notificationService.ensureAndroidNotificationChannel();
       await notificationService.rescheduleAllReminders(() => reminderService.getAllReminders());
     }).catch(err => console.error('Error initializing app data:', err));
     
@@ -32,6 +33,7 @@ export default function App() {
     const subscription = AppState.addEventListener('change', async (nextAppState) => {
       if (nextAppState === 'active') {
         console.log('📱 App came to foreground, rescheduling all reminders...');
+        await notificationService.ensureAndroidNotificationChannel();
         await notificationService.rescheduleAllReminders(() => reminderService.getAllReminders());
       }
     });

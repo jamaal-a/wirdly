@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppSettings } from '../types';
 import { settingsService } from '../services/settingsService';
 import { themeService } from '../services/themeService';
+import { notificationService } from '../services/notificationService';
 
 const SettingsScreen: React.FC = () => {
   const theme = themeService.getCurrentTheme();
@@ -23,6 +24,10 @@ const SettingsScreen: React.FC = () => {
   const [modalType, setModalType] = useState<string>('');
   const [modalValue, setModalValue] = useState<string>('');
   const [showGuide, setShowGuide] = useState(false);
+  const [sliderModalTitle, setSliderModalTitle] = useState('');
+  const [sliderMin, setSliderMin] = useState(1);
+  const [sliderMax, setSliderMax] = useState(30);
+  const [sliderSettingKey, setSliderSettingKey] = useState<keyof AppSettings | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -43,9 +48,23 @@ const SettingsScreen: React.FC = () => {
     setSettings(settingsService.getAllSettings());
   };
 
+  const refreshPrayerAlertsIfNeeded = (key: keyof AppSettings) => {
+    if (
+      key === 'prayerNotifications' ||
+      key === 'prayerNotificationTime' ||
+      key === 'notificationSound' ||
+      key === 'calculationMethod' ||
+      key === 'locationMethod' ||
+      key === 'manualLocation'
+    ) {
+      notificationService.refreshPrayerTimeNotificationsFromSettings().catch(() => {});
+    }
+  };
+
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     const updatedSettings = settingsService.updateSetting(key, value);
     setSettings(updatedSettings);
+    refreshPrayerAlertsIfNeeded(key);
   };
 
   const showCalculationMethodModal = () => {
@@ -88,10 +107,19 @@ const SettingsScreen: React.FC = () => {
   const handleModalSave = () => {
     switch (modalType) {
       case 'calculationMethod':
-        updateSetting('calculationMethod', parseInt(modalValue) || 2);
+        updateSetting('calculationMethod', parseInt(modalValue, 10) || 2);
         break;
       case 'location':
         updateSetting('locationMethod', modalValue as 'gps' | 'manual');
+        break;
+      case 'slider':
+        if (sliderSettingKey) {
+          const parsed = parseInt(modalValue.replace(/[^0-9]/g, ''), 10);
+          const v = Number.isFinite(parsed)
+            ? Math.max(sliderMin, Math.min(sliderMax, parsed))
+            : sliderMin;
+          updateSetting(sliderSettingKey, v as AppSettings[typeof sliderSettingKey]);
+        }
         break;
       // Commented out - may use in the future
       // case 'language':
@@ -274,7 +302,7 @@ const SettingsScreen: React.FC = () => {
     subtitle: string,
     icon: string,
     value: number,
-    onValueChange: (value: number) => void,
+    settingKey: keyof AppSettings,
     min: number,
     max: number
   ) => {
@@ -283,6 +311,10 @@ const SettingsScreen: React.FC = () => {
         style={dynamicStyles.settingItem}
         onPress={() => {
           setModalType('slider');
+          setSliderModalTitle(title);
+          setSliderSettingKey(settingKey);
+          setSliderMin(min);
+          setSliderMax(max);
           setModalValue(value.toString());
           setModalVisible(true);
         }}
@@ -437,7 +469,7 @@ const SettingsScreen: React.FC = () => {
               'Minutes before prayer to notify',
               '⏰',
               settings.prayerNotificationTime,
-              (value) => updateSetting('prayerNotificationTime', value),
+              'prayerNotificationTime',
               1,
               30
             )}
@@ -458,7 +490,7 @@ const SettingsScreen: React.FC = () => {
               'Days to cache prayer times',
               '💾',
               settings.cacheDays,
-              (value) => updateSetting('cacheDays', value),
+              'cacheDays',
               1,
               30
             )}
@@ -618,7 +650,7 @@ const SettingsScreen: React.FC = () => {
             <View style={styles.aboutCard}>
               <Text style={styles.aboutTitle}>Wirdly</Text>
               <Text style={styles.aboutSubtitle}>Your Spiritual Companion</Text>
-              <Text style={styles.aboutVersion}>Version 1.4.5</Text>
+              <Text style={styles.aboutVersion}>Version 1.4.8</Text>
               <Text style={styles.aboutDescription}>
                 Wirdly is a smart Islamic reminder app that prompts you to read the specific awraad or dua you've personally set, automatically timed to your local salah or any other time so you never miss a wird again.
               </Text>
@@ -642,6 +674,8 @@ const SettingsScreen: React.FC = () => {
             <Text style={styles.modalTitle}>
               {modalType === 'calculationMethod' && 'Calculation Method'}
               {modalType === 'location' && 'Location Method'}
+              {modalType === 'theme' && 'Theme'}
+              {modalType === 'slider' && (sliderModalTitle || 'Set value')}
               {/* Commented out - may use in the future */}
               {/* {modalType === 'language' && 'Language'} */}
               {/* {modalType === 'timeFormat' && 'Time Format'} */}
@@ -656,13 +690,13 @@ const SettingsScreen: React.FC = () => {
                       key={method}
                       style={[
                         styles.optionItem,
-                        settings.calculationMethod === method && styles.optionItemSelected
+                        Number(modalValue) === method && styles.optionItemSelected
                       ]}
                       onPress={() => setModalValue(method.toString())}
                     >
                       <Text style={[
                         styles.optionText,
-                        settings.calculationMethod === method && styles.optionTextSelected
+                        Number(modalValue) === method && styles.optionTextSelected
                       ]}>
                         {settingsService.getCalculationMethodName(method)}
                       </Text>
@@ -676,13 +710,13 @@ const SettingsScreen: React.FC = () => {
                   <TouchableOpacity
                     style={[
                       styles.optionItem,
-                      settings.locationMethod === 'gps' && styles.optionItemSelected
+                      modalValue === 'gps' && styles.optionItemSelected
                     ]}
                     onPress={() => setModalValue('gps')}
                   >
                     <Text style={[
                       styles.optionText,
-                      settings.locationMethod === 'gps' && styles.optionTextSelected
+                      modalValue === 'gps' && styles.optionTextSelected
                     ]}>
                       Use device GPS
                     </Text>
@@ -690,18 +724,39 @@ const SettingsScreen: React.FC = () => {
                   <TouchableOpacity
                     style={[
                       styles.optionItem,
-                      settings.locationMethod === 'manual' && styles.optionItemSelected
+                      modalValue === 'manual' && styles.optionItemSelected
                     ]}
                     onPress={() => setModalValue('manual')}
                   >
                     <Text style={[
                       styles.optionText,
-                      settings.locationMethod === 'manual' && styles.optionTextSelected
+                      modalValue === 'manual' && styles.optionTextSelected
                     ]}>
                       Manual location
                     </Text>
                   </TouchableOpacity>
                 </>
+              )}
+
+              {modalType === 'slider' && (
+                <View style={{ paddingVertical: 4 }}>
+                  <Text style={[styles.optionText, { marginBottom: 12 }]}>
+                    Enter a number between {sliderMin} and {sliderMax}
+                  </Text>
+                  <TextInput
+                    style={{
+                      borderWidth: 1,
+                      borderColor: '#D0D0D0',
+                      borderRadius: 8,
+                      padding: 14,
+                      fontSize: 18,
+                      color: '#333',
+                    }}
+                    keyboardType="number-pad"
+                    value={modalValue}
+                    onChangeText={setModalValue}
+                  />
+                </View>
               )}
 
               {modalType === 'theme' && (

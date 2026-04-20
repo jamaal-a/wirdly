@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import { toGregorian, toHijri } from 'hijri-converter';
 import {
   AppSettings,
@@ -26,18 +27,94 @@ const MAX_NOTIFICATIONS_PER_REMINDER = 32;
 /** iOS often rejects date triggers in the immediate future; keep a small buffer. */
 const MIN_NOTIFICATION_LEAD_MS = 5_000;
 
+/** Android 8+ requires a channel for heads-up / reliable delivery of scheduled notifications. */
+const ANDROID_NOTIF_CHANNEL_ID = 'wirdly_default';
+
+const resolveLocationForPrayerNotifications = async (): Promise<Location | null> => {
+  const s = settingsService.getAllSettings();
+  if (s.locationMethod === 'manual' && s.manualLocation) {
+    return {
+      latitude: s.manualLocation.latitude,
+      longitude: s.manualLocation.longitude,
+    };
+  }
+  let loc = await getLastKnownLocation();
+  if (loc) return loc;
+  try {
+    return await getCurrentLocation();
+  } catch {
+    return null;
+  }
+};
+
+const cancelPrayerAlertNotifications = async (): Promise<void> => {
+  const existing = await Notifications.getAllScheduledNotificationsAsync();
+  await Promise.all(
+    existing
+      .filter(n => {
+        const d = n.content?.data as Record<string, unknown> | undefined;
+        return d?.type === 'prayer_alert';
+      })
+      .map(n => Notifications.cancelScheduledNotificationAsync(n.identifier)),
+  );
+};
+
+/** Map common typos / casing from storage or older builds onto canonical Aladhan keys. */
+const PRAYER_NAME_ALIASES: Record<string, keyof PrayerTimes> = {
+  fajr: 'Fajr',
+  dhuhr: 'Dhuhr',
+  zuhr: 'Dhuhr',
+  zohr: 'Dhuhr',
+  asr: 'Asr',
+  maghrib: 'Maghrib',
+  isha: 'Isha',
+};
+
+const normalizePrayerKey = (key: string): keyof PrayerTimes | null => {
+  const t = String(key).trim();
+  if ((PRAYER_WIRD_KEYS as readonly string[]).includes(t)) return t as keyof PrayerTimes;
+  const alias = PRAYER_NAME_ALIASES[t.toLowerCase()];
+  return alias ?? null;
+};
+
 const getPrayerKeysForReminder = (reminder: WirdReminder): (keyof PrayerTimes)[] => {
-  const raw: (keyof PrayerTimes)[] =
+  const raw: string[] = (
     reminder.prayerTimes && reminder.prayerTimes.length > 0
-      ? reminder.prayerTimes
+      ? (reminder.prayerTimes as unknown as string[])
       : reminder.prayerTime
-        ? [reminder.prayerTime]
-        : [];
-  const allowed = new Set(PRAYER_WIRD_KEYS as unknown as string[]);
-  return raw.filter((k): k is keyof PrayerTimes => allowed.has(k as string));
+        ? [String(reminder.prayerTime)]
+        : []
+  );
+  const seen = new Set<string>();
+  const out: (keyof PrayerTimes)[] = [];
+  for (const k of raw) {
+    const norm = normalizePrayerKey(k);
+    if (norm && !seen.has(norm)) {
+      seen.add(norm);
+      out.push(norm);
+    }
+  }
+  if (raw.length > 0 && out.length === 0) {
+    console.warn(
+      `Prayer reminder "${reminder.title}" (${reminder.category}) had prayer keys none of which matched Fajr/Dhuhr/Asr/Maghrib/Isha — raw:`,
+      raw,
+    );
+  }
+  return out;
 };
 
 const DEFAULT_TIME: TimeComponents = { hours: 9, minutes: 0 };
+
+const MAX_NOTIF_TITLE_LEN = 180;
+const MAX_NOTIF_BODY_LEN = 380;
+const MAX_NOTIF_DATA_STRING_LEN = 400;
+
+/** Strip NULs and cap length so Android/iOS notification payloads stay valid. */
+const sanitizeNotifText = (value: unknown, maxLen: number): string => {
+  if (value === undefined || value === null) return '';
+  const s = String(value).replace(/\u0000/g, '');
+  return s.length <= maxLen ? s : s.slice(0, maxLen);
+};
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -208,21 +285,17 @@ const computeNextHijriYearlyOccurrence = (hijriMonth: number, hijriDay: number, 
   }
 };
 
-const computeNextHourlyOccurrence = (): Date => {
+/** Next N clock-hour starts (:00) strictly after `minTimeMs` (for Android / fallback). */
+const computeTopOfHourOccurrences = (count: number, minTimeMs: number): Date[] => {
   const now = new Date();
-  const next = new Date(now);
-  next.setMinutes(0, 0, 0);
-  next.setHours(now.getHours() + (now.getMinutes() === 0 && now.getSeconds() === 0 ? 0 : 1));
-  return next;
-};
-
-/** Returns the next N hourly occurrence times (e.g. 24 for a full day ahead) */
-const computeNextHourlyOccurrences = (count: number): Date[] => {
+  let slot = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0, 0);
+  while (slot.getTime() <= minTimeMs) {
+    slot.setHours(slot.getHours() + 1);
+  }
   const results: Date[] = [];
-  let next = computeNextHourlyOccurrence();
   for (let i = 0; i < count; i++) {
-    results.push(new Date(next));
-    next.setHours(next.getHours() + 1);
+    results.push(new Date(slot));
+    slot.setHours(slot.getHours() + 1);
   }
   return results;
 };
@@ -371,26 +444,42 @@ const computeYearlyBatchOccurrences = (reminder: WirdReminder): Date[] => {
   return results;
 };
 
-const buildReminderNotificationData = (reminder: WirdReminder): ReminderNotificationData => ({
-  type: 'wird_reminder',
-  reminderId: reminder.id,
-  reminderTitle: reminder.title,
-  reminderDescription: reminder.description,
-  reminderCategory: reminder.category,
-  reminderImageUrl: reminder.imageUrl,
-  reminderFileUrl: reminder.fileUrl,
-  reminderLinkUrl: reminder.linkUrl,
-});
+const buildReminderNotificationData = (reminder: WirdReminder): ReminderNotificationData => {
+  const data: ReminderNotificationData = {
+    type: 'wird_reminder',
+    reminderId: reminder.id,
+    reminderTitle: sanitizeNotifText(reminder.title, MAX_NOTIF_DATA_STRING_LEN) || 'Wird reminder',
+    reminderCategory: reminder.category,
+  };
+  const desc = reminder.description ? sanitizeNotifText(reminder.description, MAX_NOTIF_DATA_STRING_LEN) : '';
+  if (desc) data.reminderDescription = desc;
+  if (reminder.imageUrl) data.reminderImageUrl = sanitizeNotifText(reminder.imageUrl, MAX_NOTIF_DATA_STRING_LEN);
+  if (reminder.fileUrl) data.reminderFileUrl = sanitizeNotifText(reminder.fileUrl, MAX_NOTIF_DATA_STRING_LEN);
+  if (reminder.linkUrl) data.reminderLinkUrl = sanitizeNotifText(reminder.linkUrl, MAX_NOTIF_DATA_STRING_LEN);
+  return data;
+};
 
 const buildNotificationContent = (
   reminder: WirdReminder,
   enableSound: boolean | undefined,
-): Notifications.NotificationContentInput => ({
-  title: `📿 ${reminder.title}`,
-  body: reminder.description || 'Time for your wird reminder',
-  sound: enableSound ? 'default' : false,
-  data: buildReminderNotificationData(reminder) as unknown as Record<string, unknown>,
-});
+): Notifications.NotificationContentInput => {
+  const titleCore = sanitizeNotifText(reminder.title, MAX_NOTIF_TITLE_LEN) || 'Wird reminder';
+  const bodyText =
+    sanitizeNotifText(reminder.description, MAX_NOTIF_BODY_LEN) || 'Time for your wird reminder';
+  const base: Notifications.NotificationContentInput = {
+    title: `📿 ${titleCore}`,
+    body: bodyText,
+    sound: enableSound ? 'default' : false,
+    data: buildReminderNotificationData(reminder) as unknown as Record<string, unknown>,
+  };
+  if (Platform.OS === 'android') {
+    return {
+      ...base,
+      android: { channelId: ANDROID_NOTIF_CHANNEL_ID },
+    } as Notifications.NotificationContentInput;
+  }
+  return base;
+};
 
 const schedulePrayerWirdNotifications = async (
   reminder: WirdReminder,
@@ -464,7 +553,7 @@ const schedulePrayerWirdNotifications = async (
     }
   }
   const toSchedule = uniqueSorted
-    .filter(d => d.getTime() > minTime)
+    .filter(d => d.getTime() >= minTime)
     .slice(0, maxOccurrences);
 
   let scheduledCount = 0;
@@ -482,51 +571,6 @@ const schedulePrayerWirdNotifications = async (
 
   console.log(`✅ Scheduled ${scheduledCount} prayer notifications for "${reminder.title}"`);
   return scheduledCount > 0 ? 'prayer_batch' : null;
-};
-
-const buildTrigger = (
-  reminder: WirdReminder,
-  nextOccurrence: Date,
-): Notifications.NotificationTriggerInput | null => {
-  // Ensure we only schedule future notifications
-  const now = new Date();
-  if (nextOccurrence <= now) {
-    console.warn(`⚠️ Next occurrence is in the past for reminder "${reminder.title}". Skipping.`);
-    return null;
-  }
-
-  switch (reminder.type) {
-    case 'daily': {
-      const { hours, minutes } = parseTimeToComponents(reminder.time);
-      // Use DateTrigger for the first occurrence - schedule for next occurrence
-      // Note: For true daily repeats, we'd need to schedule multiple notifications
-      // For now, schedule the next occurrence and it will need to be rescheduled after it fires
-      return { type: 'date', date: nextOccurrence } as Notifications.NotificationTriggerInput;
-    }
-    case 'weekly': {
-      if (reminder.dayOfWeek === undefined) return null;
-      // Use DateTrigger for the next weekly occurrence
-      return { type: 'date', date: nextOccurrence } as Notifications.NotificationTriggerInput;
-    }
-    case 'monthly': {
-      if (!reminder.dayOfMonth) return null;
-      // Use DateTrigger for the next monthly occurrence
-      return { type: 'date', date: nextOccurrence } as Notifications.NotificationTriggerInput;
-    }
-    case 'yearly': {
-      if (!reminder.month || !reminder.dayOfMonth) return null;
-      // Use DateTrigger for the next yearly occurrence
-      return { type: 'date', date: nextOccurrence } as Notifications.NotificationTriggerInput;
-    }
-    case 'hourly': {
-      // Use DateTrigger for the next hourly occurrence
-      return { type: 'date', date: nextOccurrence } as Notifications.NotificationTriggerInput;
-    }
-    case 'prayer':
-      return null;
-    default:
-      return null;
-  }
 };
 
 const cancelReminderNotifications = async (reminderId: string): Promise<number> => {
@@ -562,7 +606,7 @@ const scheduleBatchAtDates = async (
   await cancelReminderNotifications(reminder.id);
   const minTime = Date.now() + MIN_NOTIFICATION_LEAD_MS;
   const sorted = [...dates]
-    .filter(d => d.getTime() > minTime)
+    .filter(d => d.getTime() >= minTime)
     .sort((a, b) => a.getTime() - b.getTime());
   const capped = sorted.slice(0, MAX_NOTIFICATIONS_PER_REMINDER);
   let scheduledCount = 0;
@@ -620,48 +664,113 @@ export const notificationService = {
     }
   },
 
-  schedulePrayerNotifications: async (prayerTimes: PrayerTimes, date: Date) => {
+  /** Android 8+: required for scheduled local notifications to show reliably. */
+  ensureAndroidNotificationChannel: async (): Promise<void> => {
+    if (Platform.OS !== 'android') return;
+    try {
+      await Notifications.setNotificationChannelAsync(ANDROID_NOTIF_CHANNEL_ID, {
+        name: 'Wirdly',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+      });
+    } catch (e) {
+      console.warn('ensureAndroidNotificationChannel failed', e);
+    }
+  },
+
+  /**
+   * Schedule salah alerts for one or more calendar days (today + tomorrow recommended).
+   * Respects `prayerNotificationTime` (minutes before adhan) and tags notifications with
+   * `data.type === 'prayer_alert'` so they can be cancelled reliably.
+   */
+  schedulePrayerNotifications: async (
+    blocks: Array<{ anchorDate: Date; timings: PrayerTimes }>,
+  ): Promise<void> => {
     try {
       const settings = settingsService.getAllSettings();
       if (!settings.prayerNotifications) return;
 
-      const existing = await Notifications.getAllScheduledNotificationsAsync();
-      await Promise.all(
-        existing
-          .filter(notification => typeof notification.identifier === 'string' && notification.identifier.startsWith('prayer_'))
-          .map(notification => Notifications.cancelScheduledNotificationAsync(notification.identifier)),
-      );
+      const hasPermission = await notificationService.requestPermissions();
+      if (!hasPermission) return;
 
+      await cancelPrayerAlertNotifications();
+
+      const leadMinutes = Math.max(0, Math.min(120, Number(settings.prayerNotificationTime) || 5));
       const prayerNames: Array<keyof PrayerTimes> = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
-      for (const prayerName of prayerNames) {
-        const prayerTime = prayerTimes[prayerName];
-        if (!prayerTime) continue;
+      const minTime = Date.now() + MIN_NOTIFICATION_LEAD_MS;
 
-        const parsed = parseAladhanTimeString(prayerTime);
-        if (!parsed) continue;
-        const triggerDate = new Date(date);
-        triggerDate.setHours(parsed.hours, parsed.minutes, 0, 0);
+      for (const { anchorDate, timings } of blocks) {
+        for (const prayerName of prayerNames) {
+          const prayerTime = timings[prayerName];
+          if (!prayerTime) continue;
 
-        const minTime = Date.now() + MIN_NOTIFICATION_LEAD_MS;
-        if (triggerDate.getTime() <= minTime) {
-          continue;
-        }
+          const parsed = parseAladhanTimeString(prayerTime);
+          if (!parsed) continue;
 
-        try {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `🕌 ${prayerName} Prayer Time`,
-              body: `It's time for ${prayerName} prayer`,
+          const atPrayer = new Date(anchorDate);
+          atPrayer.setHours(parsed.hours, parsed.minutes, 0, 0);
+
+          const alertDate = new Date(atPrayer.getTime() - leadMinutes * 60 * 1000);
+
+          if (alertDate.getTime() <= minTime) continue;
+
+          try {
+            const prayerContent = {
+              title:
+                leadMinutes > 0
+                  ? `🕌 ${prayerName} in ${leadMinutes} min`
+                  : `🕌 ${prayerName} prayer`,
+              body:
+                leadMinutes > 0
+                  ? `${prayerName} is at ${prayerTime.trim().split(/\s+/)[0]}`
+                  : `It's time for ${prayerName}`,
               sound: settings.notificationSound ? 'default' : false,
-            },
-            trigger: { type: 'date' as const, date: triggerDate } as Notifications.NotificationTriggerInput,
-          });
-        } catch (error) {
-          console.warn(`Failed to schedule prayer notification for ${prayerName}`, error);
+              data: { type: 'prayer_alert', prayer: prayerName },
+              ...(Platform.OS === 'android'
+                ? { android: { channelId: ANDROID_NOTIF_CHANNEL_ID } }
+                : {}),
+            } as Notifications.NotificationContentInput;
+            await Notifications.scheduleNotificationAsync({
+              content: prayerContent,
+              trigger: { type: 'date' as const, date: alertDate } as Notifications.NotificationTriggerInput,
+            });
+          } catch (error) {
+            console.warn(`Failed to schedule prayer notification for ${prayerName}`, error);
+          }
         }
       }
     } catch (error) {
       console.error('Error scheduling prayer notifications', error);
+    }
+  },
+
+  /** Re-fetch prayer times and re-schedule salah alerts (e.g. after changing settings). */
+  refreshPrayerTimeNotificationsFromSettings: async (): Promise<void> => {
+    const settings = settingsService.getAllSettings();
+    await cancelPrayerAlertNotifications();
+    if (!settings.prayerNotifications) return;
+
+    const location = await resolveLocationForPrayerNotifications();
+    if (!location) {
+      console.warn('Prayer notifications: no location available');
+      return;
+    }
+
+    const hasPermission = await notificationService.requestPermissions();
+    if (!hasPermission) return;
+
+    try {
+      const todayResp = await fetchPrayerTimesByDate(new Date(), location);
+      await new Promise<void>(r => setTimeout(r, 400));
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowResp = await fetchPrayerTimesByDate(tomorrow, location);
+      await notificationService.schedulePrayerNotifications([
+        { anchorDate: new Date(), timings: todayResp.data.timings },
+        { anchorDate: tomorrow, timings: tomorrowResp.data.timings },
+      ]);
+    } catch (e) {
+      console.warn('refreshPrayerTimeNotificationsFromSettings failed', e);
     }
   },
 
@@ -702,19 +811,37 @@ export const notificationService = {
           return scheduleBatchAtDates(reminder, dates, settings.notificationSound);
         }
         case 'hourly': {
-          // Schedule up to 24 hourly notifications ahead so they fire without opening the app
-          const hourlyDates = computeNextHourlyOccurrences(24);
           await cancelReminderNotifications(reminder.id);
           const minTime = Date.now() + MIN_NOTIFICATION_LEAD_MS;
-          let scheduledCount = 0;
-          for (const occ of hourlyDates) {
-            if (occ.getTime() <= minTime) continue;
-            const trigger = buildTrigger(reminder, occ);
-            if (!trigger) continue;
+
+          // iOS: one repeating calendar trigger at minute 0 every hour (saves notification slots
+          // and matches "on the hour" without relying on dozens of date triggers).
+          if (Platform.OS === 'ios') {
             try {
               await Notifications.scheduleNotificationAsync({
                 content: buildNotificationContent(reminder, settings.notificationSound),
-                trigger,
+                trigger: {
+                  type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+                  repeats: true,
+                  minute: 0,
+                  second: 0,
+                } as Notifications.NotificationTriggerInput,
+              });
+              console.log(`✅ Scheduled hourly (calendar, top of hour) for "${reminder.title}"`);
+              return 'hourly_calendar';
+            } catch (err) {
+              console.warn('Hourly calendar trigger failed, falling back to date batch', err);
+            }
+          }
+
+          const hourlyDates = computeTopOfHourOccurrences(48, minTime);
+          let scheduledCount = 0;
+          for (const occ of hourlyDates) {
+            if (occ.getTime() < minTime) continue;
+            try {
+              await Notifications.scheduleNotificationAsync({
+                content: buildNotificationContent(reminder, settings.notificationSound),
+                trigger: { type: 'date', date: occ } as Notifications.NotificationTriggerInput,
               });
               scheduledCount++;
             } catch (err) {
@@ -795,13 +922,17 @@ export const notificationService = {
     try {
       const triggerDate = new Date();
       triggerDate.setSeconds(triggerDate.getSeconds() + secondsFromNow);
+      const testContent = {
+        title: '🧪 Test Notification',
+        body: `This is a test notification scheduled for ${secondsFromNow} seconds from now`,
+        sound: 'default',
+        data: { type: 'test' },
+        ...(Platform.OS === 'android'
+          ? { android: { channelId: ANDROID_NOTIF_CHANNEL_ID } }
+          : {}),
+      } as Notifications.NotificationContentInput;
       const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: '🧪 Test Notification',
-          body: `This is a test notification scheduled for ${secondsFromNow} seconds from now`,
-          sound: 'default',
-          data: { type: 'test' },
-        },
+        content: testContent,
         trigger: { type: 'date' as const, date: triggerDate } as Notifications.NotificationTriggerInput,
       });
       return id;
